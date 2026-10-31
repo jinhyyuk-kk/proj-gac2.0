@@ -65,7 +65,7 @@ public class EasterEggTests
     {
         using var client = new Gac.Demo.DemoServerClient(delayScale: 0);
         using var form = new Gac.Console.UI.MainForm(client, client.Owner, Gac.Demo.DemoProgram.CreateOptions(false));
-        var items = form.Menu.Items;
+        var items = form.MenuBar.Items;
         Assert.Same(form.AboutMenuItem, items[items.Count - 1]);
         Assert.False(form.AboutMenuItem.Available);
         Assert.Empty(form.AboutMenuItem.ToolTipText ?? "");

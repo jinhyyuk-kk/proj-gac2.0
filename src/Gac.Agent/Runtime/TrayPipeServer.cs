@@ -104,7 +104,7 @@ public sealed class TrayPipeServer(ILogger<TrayPipeServer> log) : ITrayBridge
             var owner = pipe.GetAccessControl().GetOwner(typeof(SecurityIdentifier)) as SecurityIdentifier;
             using var me = WindowsIdentity.GetCurrent();
             var admins = new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null);
-            if (owner == null || !(owner.Equals(me.User) || owner.Equals(admins)))
+            if (owner == null || me.User == null || !(owner.Equals(me.User) || owner.Equals(admins)))
                 throw new PipeSquattingException(owner?.Value ?? "unknown");
             return pipe;
         }

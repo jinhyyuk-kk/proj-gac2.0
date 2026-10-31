@@ -118,7 +118,7 @@ public sealed class MainForm : Form
 
     internal bool Can(Permission p) => RolePermissions.Has(_me.Role, p);
     internal ToolStripMenuItem AboutMenuItem => _aboutItem;
-    internal MenuStrip Menu => _menu;
+    internal MenuStrip MenuBar => _menu;
 
     private static TextBox Detail() => new() { Dock = DockStyle.Fill, Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Both, WordWrap = false, Font = new Font("맑은 고딕", 9.5f), BackColor = SystemColors.Window };
 
