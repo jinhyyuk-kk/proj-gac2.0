@@ -19,6 +19,7 @@ public sealed class TrayPipeServer(ILogger<TrayPipeServer> log) : ITrayBridge
 {
     private readonly ConcurrentDictionary<Guid, TrayConnection> _connections = new();
     private readonly ConcurrentDictionary<Guid, TaskCompletionSource<PipeResponse>> _pending = new();
+    private const int MaxConnectionsPerUser = 4;
     private static readonly HashSet<string> AllowedRequests = Enum.GetNames<TrayRequest>().ToHashSet(StringComparer.Ordinal);
     public TrayRequestHandler? Handler { get; set; }
 
@@ -43,32 +44,47 @@ public sealed class TrayPipeServer(ILogger<TrayPipeServer> log) : ITrayBridge
         {
             while (!ct.IsCancellationRequested)
             {
-                try
+                if (listening == null)
                 {
-                    // The first instance must be ours: if another process already owns the name (squatting), this throws.
-                    listening ??= Create(security, first: true);
-                    await listening.WaitForConnectionAsync(ct);
-                    // Create the next listening instance BEFORE handing off the connected one, so at least one of our
-                    // instances always exists and the name can never be taken over between connections.
-                    var next = Create(security, first: false);
-                    var conn = new TrayConnection(Guid.NewGuid(), listening);
-                    listening = next;
-                    _connections[conn.Id] = conn;
-                    _ = Task.Run(() => ServeAsync(conn, ct), ct);
+                    try
+                    {
+                        // With no live instance of ours, the next one must be the first instance of the name,
+                        // otherwise another process owns it (squatting) and we refuse to serve under it.
+                        listening = Create(security, first: _connections.IsEmpty);
+                    }
+                    catch (UnauthorizedAccessException) when (_connections.IsEmpty)
+                    {
+                        log.LogError("Tray pipe name is already in use by another process (possible pipe squatting). Retrying in 30 s.");
+                        try { await Task.Delay(TimeSpan.FromSeconds(30), ct); } catch (OperationCanceledException) { break; }
+                        continue;
+                    }
+                    catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+                    {
+                        // All instances busy; existing connections keep the name alive. Try again shortly.
+                        try { await Task.Delay(TimeSpan.FromSeconds(2), ct); } catch (OperationCanceledException) { break; }
+                        continue;
+                    }
                 }
+
+                try { await listening.WaitForConnectionAsync(ct); }
                 catch (OperationCanceledException) { break; }
-                catch (UnauthorizedAccessException) when (listening == null)
-                {
-                    log.LogError("Tray pipe name is already in use by another process (possible pipe squatting). Retrying in 30 s.");
-                    try { await Task.Delay(TimeSpan.FromSeconds(30), ct); } catch (OperationCanceledException) { break; }
-                }
-                catch (Exception e)
+                catch (IOException e)
                 {
                     log.LogWarning(e, "Tray pipe accept failed");
-                    listening?.Dispose();
+                    listening.Dispose();
                     listening = null;
-                    try { await Task.Delay(1000, ct); } catch (OperationCanceledException) { break; }
+                    continue;
                 }
+
+                // Create the next listening instance BEFORE handing off the connected one so the name never goes away.
+                // If that fails, the connected instance still holds the name; creation is retried at the top of the loop.
+                NamedPipeServerStream? next = null;
+                try { next = Create(security, first: false); }
+                catch (Exception e) when (e is IOException or UnauthorizedAccessException) { log.LogWarning("Could not pre-create tray pipe instance: {Error}", e.Message); }
+                var conn = new TrayConnection(Guid.NewGuid(), listening);
+                listening = next;
+                _connections[conn.Id] = conn;
+                _ = Task.Run(() => ServeAsync(conn, ct), ct);
             }
         }
         finally { listening?.Dispose(); }
@@ -89,6 +105,11 @@ public sealed class TrayPipeServer(ILogger<TrayPipeServer> log) : ITrayBridge
                 if (conn.User == null)
                 {
                     try { conn.User = conn.Pipe.GetImpersonationUserName(); } catch (IOException) { conn.User = "?"; }
+                    if (_connections.Values.Count(c => c.User == conn.User) > MaxConnectionsPerUser)
+                    {
+                        log.LogWarning("Too many tray connections from {User}; closing", conn.User);
+                        break;
+                    }
                 }
 
                 if (msg.Kind == PipeKind.Response && msg.ReplyTo is { } replyTo)
