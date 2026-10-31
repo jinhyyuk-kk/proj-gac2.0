@@ -3,7 +3,7 @@ using Gac.Shared.Auth;
 namespace Gac.Shared.Contracts;
 
 public sealed record SetupStatus(bool NeedsOwner, string ServerName, string Version);
-public sealed record CreateOwnerRequest(string UserName, string DisplayName, string Password);
+public sealed record CreateOwnerRequest(string UserName, string DisplayName, string Password, string EnrollCode);
 public sealed record LoginRequest(string UserName, string Password);
 public sealed record LoginResponse(string Token, AccountInfo Account, DateTimeOffset ExpiresAt);
 

@@ -14,8 +14,13 @@ public sealed record CleanTarget(string Name, string Root, CleanRule Rule);
 
 /// <summary>
 /// Deletes files under one whitelisted root. Safety rules (CLAUDE.md 4.1 and section 8 rule 6):
-/// never follows or deletes symlinks/junctions, never touches a path outside the root, skips locked files,
-/// and never throws because of a single file.
+/// <list type="bullet">
+/// <item>never follows or deletes symlinks/junctions/mount points (checked on the opened handle, not by path);</item>
+/// <item>the root and every directory being walked stay pinned by a handle without share-delete, so they cannot be swapped
+/// for a junction while we work (the agent runs as SYSTEM inside user-writable folders);</item>
+/// <item>every object is re-verified by its final path to be strictly inside the root, and deleted through the same handle;</item>
+/// <item>locked, read-only or inaccessible files are skipped; one bad file never fails the run.</item>
+/// </list>
 /// </summary>
 public sealed class SafeCleaner(TimeProvider time)
 {
@@ -30,75 +35,85 @@ public sealed class SafeCleaner(TimeProvider time)
         try { root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(target.Root)); }
         catch (Exception e) when (e is ArgumentException or NotSupportedException or PathTooLongException) { return new(target.Name, 0, 0, 0); }
 
-        if (!IsSafeRoot(root)) return new(target.Name, 0, 0, 0);
-        var rootInfo = new DirectoryInfo(root);
-        if (!rootInfo.Exists) return new(target.Name, 0, 0, 0);
-        if (rootInfo.Attributes.HasFlag(FileAttributes.ReparsePoint)) return new(target.Name, 0, 0, 1);
+        if (!IsSafeRoot(root) || !Directory.Exists(root)) return new(target.Name, 0, 0, 0);
 
-        var now = time.GetUtcNow().UtcDateTime;
-        Walk(rootInfo, isRoot: true);
+        using (var rootHandle = NativeFs.OpenPinnedDirectory(root))
+        {
+            // Null: the root is a reparse point. Final path mismatch: some parent component is a junction/symlink.
+            if (rootHandle == null || !SamePath(NativeFs.FinalPath(rootHandle), root)) return new(target.Name, 0, 0, 1);
+            Walk(root, isRoot: true);
+        }
         return new CleanTargetResult(target.Name, bytes, files, skipped);
 
-        // Returns true when the directory is empty afterwards.
-        bool Walk(DirectoryInfo dir, bool isRoot)
+        // Precondition: dirPath is pinned by the caller. Returns true when the directory is empty afterwards.
+        bool Walk(string dirPath, bool isRoot)
         {
-            IEnumerable<FileSystemInfo> entries;
-            try { entries = dir.EnumerateFileSystemInfos("*", new EnumerationOptions { RecurseSubdirectories = false, IgnoreInaccessible = true, AttributesToSkip = 0, ReturnSpecialDirectories = false }).ToList(); }
+            List<FileSystemInfo> entries;
+            try
+            {
+                entries = new DirectoryInfo(dirPath).EnumerateFileSystemInfos("*", new EnumerationOptions
+                    { RecurseSubdirectories = false, IgnoreInaccessible = true, AttributesToSkip = 0, ReturnSpecialDirectories = false }).ToList();
+            }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Security.SecurityException) { skipped++; return false; }
 
             var empty = true;
+            var nowUtc = time.GetUtcNow().UtcDateTime;
             foreach (var entry in entries)
             {
-                if (!IsUnder(root, entry.FullName)) { skipped++; empty = false; continue; }
-                FileAttributes attrs;
-                try { attrs = entry.Attributes; } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { skipped++; empty = false; continue; }
+                var childPath = Path.Combine(dirPath, entry.Name);
+                if (!IsUnder(root, childPath)) { skipped++; empty = false; continue; }
 
-                // Never follow or remove reparse points (symlinks, junctions, mount points, cloud placeholders).
-                if (attrs.HasFlag(FileAttributes.ReparsePoint)) { skipped++; empty = false; continue; }
+                if (entry.Attributes.HasFlag(FileAttributes.ReparsePoint)) { skipped++; empty = false; continue; }
 
-                if (entry is DirectoryInfo sub)
+                if (entry.Attributes.HasFlag(FileAttributes.Directory))
                 {
-                    var subEmpty = Walk(sub, isRoot: false);
+                    bool subEmpty;
+                    using (var dh = NativeFs.OpenPinnedDirectory(childPath))
+                    {
+                        if (dh == null || !SamePath(NativeFs.FinalPath(dh), childPath)) { skipped++; empty = false; continue; }
+                        subEmpty = Walk(childPath, isRoot: false);
+                    }
                     if (subEmpty && target.Rule.RemoveEmptyDirectories)
                     {
-                        if (!dryRun)
-                        {
-                            try { sub.Delete(recursive: false); }
-                            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { empty = false; }
-                        }
+                        if (!dryRun && !TryDeleteEmptyDirectory(childPath)) empty = false;
                     }
                     else empty = false;
                     continue;
                 }
 
-                var file = (FileInfo)entry;
-                if (!ShouldDelete(file, target.Rule, now)) { empty = false; continue; }
-                long len;
-                try { len = file.Length; } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { skipped++; empty = false; continue; }
+                if (!ShouldDelete(entry, target.Rule, nowUtc)) { empty = false; continue; }
 
-                if (dryRun)
+                using var fh = NativeFs.OpenFile(childPath, forDelete: !dryRun, out var attrs);
+                if (fh == null) { skipped++; empty = false; continue; } // locked / in use / access denied
+                if ((attrs & (FileAttributes.ReparsePoint | FileAttributes.Directory)) != 0 || (attrs & FileAttributes.ReadOnly) != 0)
+                { skipped++; empty = false; continue; }
+                var final = NativeFs.FinalPath(fh);
+                if (final == null || !IsUnder(root, final)) { skipped++; empty = false; continue; }
+
+                var len = ((FileInfo)entry).Length;
+                if (!dryRun)
                 {
-                    bytes += len; files++;
-                    if (samples != null && samples.Count < MaxSamples) samples.Add(file.FullName);
-                    continue;
+                    try { NativeFs.DeleteByHandle(fh); }
+                    catch (IOException) { skipped++; empty = false; continue; }
                 }
-                try
-                {
-                    if (attrs.HasFlag(FileAttributes.ReadOnly)) file.Attributes = attrs & ~FileAttributes.ReadOnly;
-                    file.Delete();
-                    bytes += len; files++;
-                    if (samples != null && samples.Count < MaxSamples) samples.Add(file.FullName);
-                }
-                catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Security.SecurityException)
-                {
-                    skipped++; empty = false; // locked or in use
-                }
+                bytes += len; files++;
+                if (samples != null && samples.Count < MaxSamples) samples.Add(childPath);
             }
             return empty && !isRoot;
         }
+
+        bool TryDeleteEmptyDirectory(string path)
+        {
+            // Re-open without following reparse points; if it was swapped for a junction we see the reparse flag and stop.
+            using var h = NativeFs.OpenFile(path, forDelete: true, out var attrs);
+            if (h == null || (attrs & FileAttributes.ReparsePoint) != 0 || (attrs & FileAttributes.Directory) == 0) return false;
+            if (!SamePath(NativeFs.FinalPath(h), path)) return false;
+            try { NativeFs.DeleteByHandle(h); return true; }
+            catch (IOException) { return false; } // not empty or in use
+        }
     }
 
-    private static bool ShouldDelete(FileInfo f, CleanRule rule, DateTime nowUtc)
+    private static bool ShouldDelete(FileSystemInfo f, CleanRule rule, DateTime nowUtc)
     {
         if (rule.KeepFileNames.Contains(f.Name)) return false;
         DateTime newest;
@@ -108,6 +123,9 @@ public sealed class SafeCleaner(TimeProvider time)
         if (rule.OlderThan is { } older) return age > older;
         return age >= rule.MinAge;
     }
+
+    private static bool SamePath(string? a, string b) =>
+        a != null && string.Equals(Path.TrimEndingDirectorySeparator(a), Path.TrimEndingDirectorySeparator(b), StringComparison.OrdinalIgnoreCase);
 
     /// <summary>True when <paramref name="path"/> is strictly inside <paramref name="root"/> (not equal, not a sibling with the same prefix).</summary>
     public static bool IsUnder(string root, string path)

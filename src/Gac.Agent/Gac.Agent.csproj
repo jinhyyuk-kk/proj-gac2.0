@@ -1,13 +1,31 @@
 <Project Sdk="Microsoft.NET.Sdk.Worker">
 
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
-    <Nullable>enable</Nullable>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <UserSecretsId>dotnet-Gac.Agent-7798d82d-8f37-43de-aec9-6665a81d9a7d</UserSecretsId>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>Gac.Agent</AssemblyName>
+    <RootNamespace>Gac.Agent</RootNamespace>
+    <UserSecretsId></UserSecretsId>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.14" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="10.0.14" />
   </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Gac.Shared\Gac.Shared.csproj" />
+    <ProjectReference Include="..\Gac.Modules.Clean\Gac.Modules.Clean.csproj" />
+    <ProjectReference Include="..\Gac.Modules.Shutdown\Gac.Modules.Shutdown.csproj" />
+    <ProjectReference Include="..\Gac.Modules.NetDiag\Gac.Modules.NetDiag.csproj" />
+    <ProjectReference Include="..\Gac.Modules.Errors\Gac.Modules.Errors.csproj" />
+    <ProjectReference Include="..\Gac.Modules.Update\Gac.Modules.Update.csproj" />
+    <ProjectReference Include="..\Gac.Modules.Deploy\Gac.Modules.Deploy.csproj" />
+    <ProjectReference Include="..\Gac.Modules.Health\Gac.Modules.Health.csproj" />
+    <ProjectReference Include="..\Gac.Modules.Inspect\Gac.Modules.Inspect.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Gac.Agent.Tests" />
+  </ItemGroup>
+
 </Project>

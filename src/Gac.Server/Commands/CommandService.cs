@@ -22,7 +22,7 @@ public sealed class CommandService(Db db, AuditLog audit, TimeProvider time)
         public string payload = ""; public string status = ""; public long created_at; public long? finished_at; public string? summary; public string? data;
     }
 
-    public SendCommandResponse Create(Session actor, SendCommandRequest req, Func<string, int?> groupOf)
+    public SendCommandResponse Create(Session actor, SendCommandRequest req, Func<string, int?> groupOf, Func<string, DeployPackage?> packageOf)
     {
         if (!ModuleActions.IsKnown(req.Module, req.Action)) throw new GacException("알 수 없는 모듈 명령입니다.");
         var needed = RolePermissions.RequiredFor(req.Module, req.Action);
@@ -31,6 +31,15 @@ public sealed class CommandService(Db db, AuditLog audit, TimeProvider time)
         if (System.Text.Encoding.UTF8.GetByteCount(req.PayloadJson ?? "") > MaxPayloadBytes) throw new GacException("명령 내용이 너무 큽니다.");
         var payload = string.IsNullOrWhiteSpace(req.PayloadJson) ? "{}" : req.PayloadJson;
         try { using var _ = JsonDocument.Parse(payload); } catch (JsonException) { throw new GacException("명령 내용 형식이 올바르지 않습니다."); }
+
+        // Package installs run as SYSTEM: file name, hash and silent arguments always come from the stored package record
+        // (managed by Admin/Owner), never from the client, so an Operator cannot inject installer arguments.
+        if (req.Module == ModuleIds.Deploy && req.Action == ModuleActions.DeployInstall)
+        {
+            var asked = GacJson.Deserialize<DeployPackageRequest>(payload) ?? throw new GacException("배포 명령 내용이 올바르지 않습니다.");
+            var pkg = packageOf(asked.PackageId ?? "") ?? throw new GacException("배포 패키지를 찾을 수 없습니다.", 404);
+            payload = GacJson.Serialize(new DeployPackageRequest(pkg.Id, pkg.FileName, pkg.Sha256, pkg.SilentArgs, Math.Clamp(asked.TimeoutSeconds, 30, 4 * 3600)));
+        }
 
         var pcs = req.PcIds.Distinct().ToList();
         foreach (var pc in pcs)
@@ -125,14 +134,17 @@ public sealed class CommandService(Db db, AuditLog audit, TimeProvider time)
     public IReadOnlyList<CommandBatchSummary> Batches(Session s, int limit)
     {
         using var c = db.Open();
+        // Group-scoped roles only see (and count) commands for PCs in their assigned groups.
+        var scoped = RolePermissions.IsGroupScoped(s.Role);
         var rows = c.Query<(string id, string module, string action, string created_by, long created_at, long total, long done, long failed)>("""
             SELECT b.id, b.module, b.action, b.created_by, b.created_at,
                    COUNT(c.id),
                    SUM(CASE WHEN c.status IN ('Succeeded','Failed','Expired','Rejected') THEN 1 ELSE 0 END),
                    SUM(CASE WHEN c.status IN ('Failed','Expired','Rejected') THEN 1 ELSE 0 END)
-            FROM batches b JOIN commands c ON c.batch_id = b.id
+            FROM batches b JOIN commands c ON c.batch_id = b.id JOIN pcs p ON p.id = c.pc_id
+            WHERE @scoped = 0 OR p.group_id IN @groups
             GROUP BY b.id ORDER BY b.created_at DESC LIMIT @limit
-            """, new { limit });
+            """, new { limit, scoped = scoped ? 1 : 0, groups = s.GroupIds.DefaultIfEmpty(-1) });
         return rows.Select(r => new CommandBatchSummary(Guid.Parse(r.id), r.module, r.action, r.created_by, Time.At(r.created_at), (int)r.total, (int)r.done, (int)r.failed)).ToList();
     }
 

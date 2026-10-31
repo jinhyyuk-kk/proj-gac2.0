@@ -22,3 +22,8 @@ One line each: decision — reason.
 - Deploy packages are uploaded to the server through the API and stored under `%ProgramData%\GAC\Server\packages\<sha256>` — content-addressed, hash checked on both sides.
 - Console session token stored only in memory (re-login each launch) — no secrets on disk on the operator PC.
 - Demo export buttons do not write files — "nothing touches the real machine" in demo mode.
+- Clean runs as SYSTEM in user-writable folders, so it pins every directory by handle (no share-delete), checks reparse flags on the handle, verifies final paths and deletes through the same handle; read-only files are skipped — prevents junction-swap races (security review).
+- Re-enrollment reuses a PC record only if name and a non-empty MAC both match — prevents identity takeover by name (security review).
+- Package-install commands are rebuilt on the server from the stored package record (file, hash, silent args) — Operators cannot inject installer arguments for SYSTEM installs (security review).
+- Operators see only command batches/policies of their assigned groups; Operators also only see PCs in their groups.
+- First-run Owner creation requires the enrollment code shown only on the Admin PC — prevents a LAN race to claim the Owner account (security review).

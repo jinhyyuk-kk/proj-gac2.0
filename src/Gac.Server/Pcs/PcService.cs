@@ -41,14 +41,21 @@ public sealed class PcService(Db db, SettingsStore settings, AuditLog audit, Tim
             System.Text.Encoding.UTF8.GetBytes(EnrollmentProof.NormalizeCode(code ?? "")),
             System.Text.Encoding.UTF8.GetBytes(EnrollmentProof.NormalizeCode(EnrollCode)));
 
-    /// <summary>Enrolls (or re-enrolls) an agent. Re-enrolling the same machine name keeps its group but issues a new key.</summary>
+    /// <summary>
+    /// Enrolls (or re-enrolls) an agent. An existing record is reused only when both the name and a non-empty MAC address
+    /// match (re-install on the same hardware keeps its group); otherwise a new record is created so nobody can take over
+    /// another PC's identity just by reusing its name.
+    /// </summary>
     public (string AgentId, byte[] Key) Enroll(EnrollRequest req)
     {
         var key = RandomNumberGenerator.GetBytes(32);
         var name = (req.MachineName ?? "").Trim();
         if (name.Length is 0 or > 64) throw new GacException("PC 이름이 올바르지 않습니다.");
+        var mac = string.IsNullOrWhiteSpace(req.MacAddress) ? null : req.MacAddress.Trim().ToUpperInvariant();
         using var c = db.Open();
-        var existing = c.QuerySingleOrDefault<string>("SELECT id FROM pcs WHERE name = @name COLLATE NOCASE AND (mac = @mac OR mac IS NULL OR @mac IS NULL)", new { name, mac = req.MacAddress });
+        var existing = mac == null ? null
+            : c.QuerySingleOrDefault<string>("SELECT id FROM pcs WHERE name = @name COLLATE NOCASE AND mac = @mac LIMIT 1", new { name, mac });
+        req = req with { MacAddress = mac };
         var id = existing ?? Guid.NewGuid().ToString("N");
         if (existing == null)
             c.Execute("INSERT INTO pcs(id, name, agent_key, enrolled_at, os, agent_version, mac) VALUES(@id, @name, @key, @now, @os, @ver, @mac)",

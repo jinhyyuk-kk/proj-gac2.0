@@ -71,7 +71,14 @@ public static class Endpoints
 
         // ---------- console: setup & auth ----------
         app.MapGet("/api/setup", (AccountService acc) => Results.Ok(new SetupStatus(acc.NeedsOwner(), Environment.MachineName, version)));
-        app.MapPost("/api/setup/owner", (CreateOwnerRequest req, AccountService acc) => Results.Ok(acc.CreateOwner(req)));
+        // First-run owner creation requires the enrollment code, which is only shown on the Admin PC (installer / admin-only file).
+        app.MapPost("/api/setup/owner", (CreateOwnerRequest req, AccountService acc, PcService pcs, EnrollThrottle throttle, HttpContext ctx) =>
+        {
+            var ip = ctx.Connection.RemoteIpAddress?.ToString() ?? "?";
+            if (!throttle.Allow(ip)) return Error("시도가 너무 많습니다. 잠시 후 다시 시도하세요.", 429);
+            if (!pcs.CheckCode(req.EnrollCode)) { throttle.Fail(ip); return Error("등록 코드가 올바르지 않습니다. 관리 PC에 표시된 등록 코드를 입력하세요.", 403); }
+            return Results.Ok(acc.CreateOwner(req));
+        });
         app.MapPost("/api/auth/login", (LoginRequest req, AccountService acc) => Results.Ok(acc.Login(req)));
 
         var api = app.MapGroup("/api").AddEndpointFilter(SessionFilter);
@@ -95,13 +102,14 @@ public static class Endpoints
         api.MapPost("/groups", (SaveGroupRequest req, HttpContext ctx, PcService pcs) => Need(ctx, Permission.ManageGroups) ?? Results.Ok(pcs.CreateGroup(S(ctx), req.Name)));
         api.MapPut("/groups/{id:int}", (int id, SaveGroupRequest req, HttpContext ctx, PcService pcs) => Need(ctx, Permission.ManageGroups) ?? Do(() => pcs.RenameGroup(S(ctx), id, req.Name)));
         api.MapDelete("/groups/{id:int}", (int id, HttpContext ctx, PcService pcs) => Need(ctx, Permission.ManageGroups) ?? Do(() => pcs.DeleteGroup(S(ctx), id)));
-        api.MapGet("/groups/{id:int}/policy", (int id, HttpContext ctx, PolicyService p) => Need(ctx, Permission.ViewPcs) ?? Results.Ok(p.GetGroupPolicy(id)));
+        api.MapGet("/groups/{id:int}/policy", (int id, HttpContext ctx, PolicyService p) =>
+            Need(ctx, Permission.ViewPcs) ?? (S(ctx).CanAccessGroup(id) ? Results.Ok(p.GetGroupPolicy(id)) : Error("담당 그룹이 아닙니다.", 403)));
         api.MapPut("/groups/{id:int}/policy", (int id, GroupPolicy req, HttpContext ctx, PolicyService p) =>
             Need(ctx, Permission.ManagePolicies) ?? Do(() => p.SaveGroupPolicy(S(ctx), req with { GroupId = id })));
 
         // commands & reports
-        api.MapPost("/commands", (SendCommandRequest req, HttpContext ctx, CommandService c, PcService pcs) =>
-            Need(ctx, Permission.RunModules) ?? Results.Ok(c.Create(S(ctx), req, pcs.GetGroupId)));
+        api.MapPost("/commands", (SendCommandRequest req, HttpContext ctx, CommandService c, PcService pcs, PackageStore store) =>
+            Need(ctx, Permission.RunModules) ?? Results.Ok(c.Create(S(ctx), req, pcs.GetGroupId, store.Get)));
         api.MapGet("/commands", (HttpContext ctx, CommandService c, int? limit) => Need(ctx, Permission.ViewReports) ?? Results.Ok(c.Batches(S(ctx), Math.Clamp(limit ?? 100, 1, 1000))));
         api.MapGet("/commands/{batchId:guid}", (Guid batchId, HttpContext ctx, CommandService c, PcService pcs) =>
             Need(ctx, Permission.ViewReports) ?? Results.Ok(c.BatchCommands(S(ctx), batchId).Where(r => S(ctx).CanAccessGroup(pcs.GetGroupId(r.PcId))).ToList()));
