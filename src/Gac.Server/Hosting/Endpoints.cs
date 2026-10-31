@@ -38,7 +38,9 @@ public static class Endpoints
         });
 
         // ---------- agent channel (HMAC-authenticated) ----------
-        var agent = app.MapGroup("/api/agent").AddEndpointFilter(AgentAuthFilter);
+        // Agent requests are HMAC-verified in middleware, before model binding consumes the body.
+        app.UseWhen(c => c.Request.Path.StartsWithSegments("/api/agent"), b => b.Use(AgentAuthMiddleware));
+        var agent = app.MapGroup("/api/agent");
 
         agent.MapPost("/poll", (PollRequest req, HttpContext ctx, PcService pcs, CommandService commands, PolicyService policies) =>
         {
@@ -170,26 +172,26 @@ public static class Endpoints
         return await next(ic);
     }
 
-    private static async ValueTask<object?> AgentAuthFilter(EndpointFilterInvocationContext ic, EndpointFilterDelegate next)
+    private static async Task AgentAuthMiddleware(HttpContext ctx, RequestDelegate next)
     {
-        var ctx = ic.HttpContext;
         var req = ctx.Request;
         var agentId = req.Headers[RequestSigner.AgentHeader].ToString();
         var ts = req.Headers[RequestSigner.TimestampHeader].ToString();
         var sig = req.Headers[RequestSigner.SignatureHeader].ToString();
-        if (agentId.Length == 0 || ts.Length == 0 || sig.Length == 0) return Results.Unauthorized();
+        if (agentId.Length == 0 || ts.Length == 0 || sig.Length == 0) { ctx.Response.StatusCode = 401; return; }
         var key = ctx.RequestServices.GetRequiredService<PcService>().GetAgentKey(agentId);
-        if (key == null) return Results.Json(new ApiError("unknown agent"), GacJson.Options, statusCode: 410);
+        if (key == null) { ctx.Response.StatusCode = 410; return; }
 
+        if (req.ContentLength > 8 * 1024 * 1024) { ctx.Response.StatusCode = 413; return; }
         req.EnableBuffering();
         using var ms = new MemoryStream();
         await req.Body.CopyToAsync(ms, ctx.RequestAborted);
         req.Body.Position = 0;
         var time = ctx.RequestServices.GetRequiredService<TimeProvider>();
         if (!RequestSigner.Verify(key, agentId, ts, sig, req.Method, req.Path + req.QueryString, ms.ToArray(), time.GetUtcNow()))
-            return Results.Unauthorized();
+        { ctx.Response.StatusCode = 401; return; }
         ctx.Items[AgentKey] = (agentId, key);
-        return await next(ic);
+        await next(ctx);
     }
 }
 

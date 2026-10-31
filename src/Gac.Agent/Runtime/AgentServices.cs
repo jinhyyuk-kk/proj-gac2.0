@@ -62,7 +62,7 @@ public sealed class PollWorker(AgentCore core, TimeProvider time, ILogger<PollWo
         }
     }
 
-    private async Task PollOnceAsync(ServerClient client, CancellationToken ct, Action<int> setPoll)
+    internal async Task PollOnceAsync(ServerClient client, CancellationToken ct, Action<int> setPoll)
     {
         var state = core.Store.LoadState();
         var resp = await client.PollAsync(new PollRequest(core.Version, Sessions.ActiveUser(), LocalIp(), Environment.OSVersion.VersionString, core.Queue.Count, state.PolicyVersion), ct);
@@ -81,6 +81,14 @@ public sealed class PollWorker(AgentCore core, TimeProvider time, ILogger<PollWo
         }
         if (rejections.Count > 0) await client.UploadRejectionsAsync(rejections, ct);
         await UploadQueueAsync(client, ct);
+    }
+
+    /// <summary>Waits until all commands started by previous polls (and their uploads) have finished. Used by tests.</summary>
+    internal async Task WhenIdleAsync()
+    {
+        Task[] tasks;
+        lock (_running) tasks = _running.ToArray();
+        await Task.WhenAll(tasks);
     }
 
     private readonly SemaphoreSlim _uploadGate = new(1, 1);

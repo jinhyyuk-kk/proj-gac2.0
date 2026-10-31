@@ -62,7 +62,7 @@ public sealed class ServerIdentity : IDisposable
             RestrictToAdmins(keyPath);
         }
 
-        var cert = X509CertificateLoader.LoadPkcs12FromFile(certPath, null, X509KeyStorageFlags.EphemeralKeySet);
+        var cert = X509CertificateLoader.LoadPkcs12FromFile(certPath, null, X509KeyStorageFlags.DefaultKeySet); // SChannel cannot use ephemeral keys for a TLS server
         var presetKey = ECDsa.Create();
         presetKey.ImportFromPem(File.ReadAllText(keyPath));
         return new ServerIdentity(cert, presetKey);

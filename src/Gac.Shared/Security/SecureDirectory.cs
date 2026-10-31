@@ -29,9 +29,10 @@ public static class SecureDirectory
             var info = new DirectoryInfo(path);
             if (info.Exists && (info.Attributes.HasFlag(FileAttributes.ReparsePoint) || !IsTrustedOwner(info)))
             {
-                // Directory.Delete on a junction/symlink removes only the link itself.
-                if (info.Attributes.HasFlag(FileAttributes.ReparsePoint)) info.Delete();
-                else info.Delete(recursive: true);
+                // Never walk/delete a user-controlled tree while elevated. Move it aside atomically (a rename of the
+                // top-level entry only; for a junction this moves the link itself) and start fresh.
+                var aside = path.TrimEnd('\\') + ".untrusted-" + Guid.NewGuid().ToString("N")[..8];
+                Directory.Move(path, aside);
                 info.Refresh();
             }
 
