@@ -2,6 +2,7 @@ using System.Security.AccessControl;
 using System.Security.Principal;
 using Gac.Shared;
 using Gac.Shared.Contracts;
+using Gac.Shared.Security;
 
 namespace Gac.Agent.Config;
 
@@ -29,9 +30,15 @@ public sealed class AgentStore
 
     public AgentStore(string? root = null)
     {
-        Root = root ?? (Environment.GetEnvironmentVariable("GAC_AGENT_DATA") is { Length: > 0 } d ? d
-            : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "GAC", "Agent"));
-        Directory.CreateDirectory(Root);
+        var gacDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "GAC");
+        Root = root ?? (Environment.GetEnvironmentVariable("GAC_AGENT_DATA") is { Length: > 0 } d ? d : Path.Combine(gacDir, "Agent"));
+        if (root == null && Root.StartsWith(gacDir, StringComparison.OrdinalIgnoreCase))
+        {
+            // SYSTEM + Administrators only; recreated if a non-admin pre-created it (protects agent.json and the queue).
+            SecureDirectory.Ensure(gacDir);
+            SecureDirectory.Ensure(Root);
+        }
+        else Directory.CreateDirectory(Root);
     }
 
     public string QueueDir => Path.Combine(Root, "queue");

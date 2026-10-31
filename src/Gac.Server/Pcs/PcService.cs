@@ -42,9 +42,9 @@ public sealed class PcService(Db db, SettingsStore settings, AuditLog audit, Tim
             System.Text.Encoding.UTF8.GetBytes(EnrollmentProof.NormalizeCode(EnrollCode)));
 
     /// <summary>
-    /// Enrolls (or re-enrolls) an agent. An existing record is reused only when both the name and a non-empty MAC address
-    /// match (re-install on the same hardware keeps its group); otherwise a new record is created so nobody can take over
-    /// another PC's identity just by reusing its name.
+    /// Enrolls (or re-enrolls) an agent. An existing record is reused only when the agent proves it holds that record's
+    /// current key (HMAC over a re-enroll message); otherwise a new record is always created. Client-supplied names or
+    /// MAC addresses never select an existing identity.
     /// </summary>
     public (string AgentId, byte[] Key) Enroll(EnrollRequest req)
     {
@@ -52,10 +52,12 @@ public sealed class PcService(Db db, SettingsStore settings, AuditLog audit, Tim
         var name = (req.MachineName ?? "").Trim();
         if (name.Length is 0 or > 64) throw new GacException("PC 이름이 올바르지 않습니다.");
         var mac = string.IsNullOrWhiteSpace(req.MacAddress) ? null : req.MacAddress.Trim().ToUpperInvariant();
-        using var c = db.Open();
-        var existing = mac == null ? null
-            : c.QuerySingleOrDefault<string>("SELECT id FROM pcs WHERE name = @name COLLATE NOCASE AND mac = @mac LIMIT 1", new { name, mac });
         req = req with { MacAddress = mac };
+        string? existing = null;
+        if (!string.IsNullOrEmpty(req.PreviousAgentId) && !string.IsNullOrEmpty(req.PreviousProof) && GetAgentKey(req.PreviousAgentId) is { } oldKey
+            && EnrollmentProof.VerifyReenroll(oldKey, req.PreviousAgentId, name, req.PreviousProof))
+            existing = req.PreviousAgentId;
+        using var c = db.Open();
         var id = existing ?? Guid.NewGuid().ToString("N");
         if (existing == null)
             c.Execute("INSERT INTO pcs(id, name, agent_key, enrolled_at, os, agent_version, mac) VALUES(@id, @name, @key, @now, @os, @ver, @mac)",

@@ -2,7 +2,10 @@ namespace Gac.Shared.Contracts;
 
 public sealed record EnrollHelloResponse(string Proof, string ServerName, string Version);
 
-public sealed record EnrollRequest(string Code, string MachineName, string? OsVersion, string? MacAddress, string AgentVersion);
+/// <param name="PreviousAgentId">Set when the agent re-enrolls and still has its old identity.</param>
+/// <param name="PreviousProof">HMAC(old agent key, <see cref="Security.EnrollmentProof.ReenrollMessage"/>) proving it owns that identity.</param>
+public sealed record EnrollRequest(string Code, string MachineName, string? OsVersion, string? MacAddress, string AgentVersion,
+    string? PreviousAgentId = null, string? PreviousProof = null);
 
 public sealed record EnrollResponse(string AgentId, string AgentKeyBase64, string PresetPublicKeyPem, int PollSeconds);
 

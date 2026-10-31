@@ -60,4 +60,16 @@ public static class EnrollmentProof
     }
 
     public static string NewNonce() => Convert.ToHexString(RandomNumberGenerator.GetBytes(16));
+
+    public static string ReenrollMessage(string previousAgentId, string machineName) => $"reenroll|{previousAgentId}|{machineName.ToUpperInvariant()}";
+
+    public static string ReenrollProof(byte[] oldKey, string previousAgentId, string machineName) =>
+        Convert.ToBase64String(HMACSHA256.HashData(oldKey, Encoding.UTF8.GetBytes(ReenrollMessage(previousAgentId, machineName))));
+
+    public static bool VerifyReenroll(byte[] oldKey, string previousAgentId, string machineName, string proof)
+    {
+        byte[] given;
+        try { given = Convert.FromBase64String(proof); } catch (FormatException) { return false; }
+        return CryptographicOperations.FixedTimeEquals(given, Convert.FromBase64String(ReenrollProof(oldKey, previousAgentId, machineName)));
+    }
 }

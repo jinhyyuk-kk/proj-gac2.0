@@ -59,7 +59,8 @@ public static class ServerCli
     /// <summary>Idempotent: safe to run again on upgrade. Keeps existing cert, keys and database.</summary>
     private static int Install(string dataDir, int port)
     {
-        Directory.CreateDirectory(dataDir);
+        if (Path.GetDirectoryName(dataDir) is { } parent) Gac.Shared.Security.SecureDirectory.Ensure(parent);
+        Gac.Shared.Security.SecureDirectory.Ensure(dataDir);
         var existing = ServerIdentity.LoadConfig(dataDir);
         if (File.Exists(Path.Combine(dataDir, "server.json"))) port = existing.Port;
         ServerIdentity.SaveConfig(dataDir, new ServerFileConfig(port));

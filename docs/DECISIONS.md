@@ -23,7 +23,8 @@ One line each: decision — reason.
 - Console session token stored only in memory (re-login each launch) — no secrets on disk on the operator PC.
 - Demo export buttons do not write files — "nothing touches the real machine" in demo mode.
 - Clean runs as SYSTEM in user-writable folders, so it pins every directory by handle (no share-delete), checks reparse flags on the handle, verifies final paths and deletes through the same handle; read-only files are skipped — prevents junction-swap races (security review).
-- Re-enrollment reuses a PC record only if name and a non-empty MAC both match — prevents identity takeover by name (security review).
+- Re-enrollment reuses a PC record only with an HMAC proof made with that record's current agent key; otherwise a new record is created (an old offline duplicate can be deleted in the console) — prevents identity takeover (security review).
+- `%ProgramData%GAC` and its Agent/Server folders get a protected SYSTEM+Administrators DACL and are recreated if a non-admin pre-created them — protects agent keys, queue and server data (security review).
 - Package-install commands are rebuilt on the server from the stored package record (file, hash, silent args) — Operators cannot inject installer arguments for SYSTEM installs (security review).
 - Operators see only command batches/policies of their assigned groups; Operators also only see PCs in their groups.
 - First-run Owner creation requires the enrollment code shown only on the Admin PC — prevents a LAN race to claim the Owner account (security review).
