@@ -113,6 +113,7 @@ public static class ReportFormatter
         if (json.TrimStart().StartsWith('['))
         {
             var list = GacJson.Deserialize<List<UninstallResult>>(json)!;
+            if (list.Count == 0) return "제거한 프로그램이 없습니다.";
             return string.Join(Environment.NewLine, list.Select(u => $"{(u.Success ? "✔" : "✖")} {u.Name}: {u.Detail}"));
         }
         var r = GacJson.Deserialize<InspectReport>(json)!;
@@ -144,11 +145,17 @@ public static class ReportFormatter
         $"{l.At.ToLocalTime():yyyy-MM-dd HH:mm} · {l.Outcome switch { ShutdownOutcome.ShutDown => "종료", ShutdownOutcome.Extended => "연장", ShutdownOutcome.Cancelled => "취소", ShutdownOutcome.Forced => "강제 종료", _ => "건너뜀" }}" +
         $" · 연장 {l.ExtensionsUsed}회" + (l.By != null ? $" · {l.By}" : "");
 
-    /// <summary>Simple CSV (UTF-8 with BOM so Excel opens Korean correctly).</summary>
+    /// <summary>
+    /// Simple CSV (UTF-8 with BOM so Excel opens Korean correctly). Cells come partly from PCs (program names, event
+    /// text), so cells starting with a formula character are prefixed with ' to prevent CSV/formula injection.
+    /// </summary>
     public static string ToCsv(IEnumerable<string[]> rows)
     {
         var sb = new StringBuilder();
-        foreach (var r in rows) sb.AppendLine(string.Join(",", r.Select(c => "\"" + (c ?? "").Replace("\"", "\"\"") + "\"")));
+        foreach (var r in rows) sb.AppendLine(string.Join(",", r.Select(c => "\"" + Neutralize(c ?? "").Replace("\"", "\"\"") + "\"")));
         return sb.ToString();
     }
+
+    public static string Neutralize(string cell) =>
+        cell.Length > 0 && cell[0] is '=' or '+' or '-' or '@' or '\t' or '\r' ? "'" + cell : cell;
 }

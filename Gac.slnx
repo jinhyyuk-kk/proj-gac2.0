@@ -2,6 +2,7 @@
   <Folder Name="/src/">
     <Project Path="src/Gac.Agent/Gac.Agent.csproj" />
     <Project Path="src/Gac.Console/Gac.Console.csproj" />
+    <Project Path="src/Gac.Demo/Gac.Demo.csproj" />
     <Project Path="src/Gac.Modules.ClassMode/Gac.Modules.ClassMode.csproj" />
     <Project Path="src/Gac.Modules.Clean/Gac.Modules.Clean.csproj" />
     <Project Path="src/Gac.Modules.Deploy/Gac.Modules.Deploy.csproj" />
@@ -17,6 +18,7 @@
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Gac.Agent.Tests/Gac.Agent.Tests.csproj" />
+    <Project Path="tests/Gac.Console.Tests/Gac.Console.Tests.csproj" />
     <Project Path="tests/Gac.Modules.Tests/Gac.Modules.Tests.csproj" />
     <Project Path="tests/Gac.Server.Tests/Gac.Server.Tests.csproj" />
     <Project Path="tests/Gac.Shared.Tests/Gac.Shared.Tests.csproj" />

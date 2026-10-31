@@ -3,9 +3,21 @@
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net10.0-windows</TargetFramework>
-    <Nullable>enable</Nullable>
     <UseWindowsForms>true</UseWindowsForms>
-    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>GAC-Demo</AssemblyName>
+    <RootNamespace>Gac.Demo</RootNamespace>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <ApplicationVisualStyles>true</ApplicationVisualStyles>
   </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Gac.Shared\Gac.Shared.csproj" />
+    <ProjectReference Include="..\Gac.Tray.UI\Gac.Tray.UI.csproj" />
+    <ProjectReference Include="..\Gac.Console\Gac.Console.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Gac.Console.Tests" />
+  </ItemGroup>
 
 </Project>
