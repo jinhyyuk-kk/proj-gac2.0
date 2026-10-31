@@ -1,0 +1,15 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Gac.Modules.ClassMode/Gac.Modules.ClassMode.csproj" />
+    <Project Path="src/Gac.Modules.Clean/Gac.Modules.Clean.csproj" />
+    <Project Path="src/Gac.Modules.Deploy/Gac.Modules.Deploy.csproj" />
+    <Project Path="src/Gac.Modules.Errors/Gac.Modules.Errors.csproj" />
+    <Project Path="src/Gac.Modules.Health/Gac.Modules.Health.csproj" />
+    <Project Path="src/Gac.Modules.Inspect/Gac.Modules.Inspect.csproj" />
+    <Project Path="src/Gac.Modules.NetDiag/Gac.Modules.NetDiag.csproj" />
+    <Project Path="src/Gac.Modules.Shutdown/Gac.Modules.Shutdown.csproj" />
+    <Project Path="src/Gac.Modules.Update/Gac.Modules.Update.csproj" />
+    <Project Path="src/Gac.Server/Gac.Server.csproj" />
+    <Project Path="src/Gac.Shared/Gac.Shared.csproj" />
+  </Folder>
+</Solution>

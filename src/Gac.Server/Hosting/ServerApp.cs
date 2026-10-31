@@ -1,0 +1,108 @@
+using System.Net;
+using Gac.Server.Accounts;
+using Gac.Server.Commands;
+using Gac.Server.Data;
+using Gac.Server.Packages;
+using Gac.Server.Pcs;
+using Gac.Server.Policies;
+using Gac.Shared;
+using Microsoft.AspNetCore.Diagnostics;
+using Microsoft.AspNetCore.Server.Kestrel.Core;
+
+namespace Gac.Server.Hosting;
+
+/// <summary>Builds the GAC Server web application. Used by the service entry point and by integration tests.</summary>
+public static class ServerApp
+{
+    public static WebApplication Build(ServerOptions options, string[]? args = null)
+    {
+        var builder = WebApplication.CreateSlimBuilder(new WebApplicationOptions
+        {
+            Args = args ?? [],
+            ContentRootPath = AppContext.BaseDirectory,
+        });
+        builder.Host.UseWindowsService(o => o.ServiceName = ServerCli.ServiceName);
+        builder.Logging.ClearProviders();
+        builder.Logging.AddSimpleConsole(o => o.SingleLine = true);
+        if (OperatingSystem.IsWindows() && !options.LoopbackOnly) builder.Logging.AddEventLog(s => s.SourceName = "GAC Server");
+        builder.Logging.SetMinimumLevel(LogLevel.Information);
+        builder.Logging.AddFilter("Microsoft.AspNetCore", LogLevel.Warning);
+
+        Directory.CreateDirectory(options.DataDir);
+        var identity = ServerIdentity.LoadOrCreate(options.DataDir);
+        var db = new Db(options.DatabasePath);
+        db.EnsureSchema();
+
+        builder.WebHost.ConfigureKestrel(k =>
+        {
+            k.AddServerHeader = false;
+            k.Limits.MaxRequestBodySize = 8 * 1024 * 1024;
+            k.Limits.MaxConcurrentConnections = 2000;
+            void Https(ListenOptions lo) { lo.Protocols = HttpProtocols.Http1AndHttp2; lo.UseHttps(identity.Certificate); }
+            if (options.LoopbackOnly) k.Listen(IPAddress.Loopback, options.Port, Https);
+            else k.ListenAnyIP(options.Port, Https);
+        });
+
+        builder.Services.ConfigureHttpJsonOptions(o =>
+        {
+            o.SerializerOptions.PropertyNamingPolicy = GacJson.Options.PropertyNamingPolicy;
+            o.SerializerOptions.DefaultIgnoreCondition = GacJson.Options.DefaultIgnoreCondition;
+            o.SerializerOptions.Encoder = GacJson.Options.Encoder;
+            foreach (var c in GacJson.Options.Converters) o.SerializerOptions.Converters.Add(c);
+        });
+
+        var time = TimeProvider.System;
+        builder.Services.AddSingleton(options);
+        builder.Services.AddSingleton(time);
+        builder.Services.AddSingleton(identity);
+        builder.Services.AddSingleton(db);
+        builder.Services.AddSingleton<SettingsStore>();
+        builder.Services.AddSingleton<AuditLog>();
+        builder.Services.AddSingleton(sp => new AccountService(db, sp.GetRequiredService<AuditLog>(), time, options.PasswordIterationsOverride ?? PasswordHasher.Iterations));
+        builder.Services.AddSingleton<PcService>();
+        builder.Services.AddSingleton<CommandService>();
+        builder.Services.AddSingleton<PolicyService>();
+        builder.Services.AddSingleton<EnrollThrottle>();
+        builder.Services.AddSingleton(sp => new PackageStore(db, sp.GetRequiredService<AuditLog>(), time, options.PackagesDir));
+        builder.Services.AddHostedService<MaintenanceService>();
+
+        var app = builder.Build();
+        app.UseExceptionHandler(e => e.Run(async ctx =>
+        {
+            var ex = ctx.Features.Get<IExceptionHandlerFeature>()?.Error;
+            var (status, message) = ex switch
+            {
+                GacException g => (g.Status, g.Message),
+                Microsoft.AspNetCore.Http.BadHttpRequestException b => (b.StatusCode, "요청 형식이 올바르지 않습니다."),
+                _ => (500, "서버 내부 오류가 발생했습니다."),
+            };
+            if (status == 500) app.Logger.LogError(ex, "Unhandled server error");
+            ctx.Response.StatusCode = status;
+            await ctx.Response.WriteAsJsonAsync(new ApiError(message), GacJson.Options);
+        }));
+        Endpoints.Map(app);
+        return app;
+    }
+}
+
+/// <summary>Background housekeeping: trims old sessions, reports and audit rows so the DB stays small.</summary>
+public sealed class MaintenanceService(Db db, TimeProvider time, ILogger<MaintenanceService> log) : BackgroundService
+{
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        while (!stoppingToken.IsCancellationRequested)
+        {
+            try
+            {
+                var now = time.GetUtcNow();
+                using var c = db.Open();
+                Dapper.SqlMapper.Execute(c, "DELETE FROM sessions WHERE last_seen < @t", new { t = Time.Ms(now - AccountService.SessionIdle) });
+                Dapper.SqlMapper.Execute(c, "DELETE FROM reports WHERE finished_at < @t", new { t = Time.Ms(now.AddDays(-180)) });
+                Dapper.SqlMapper.Execute(c, "DELETE FROM batches WHERE created_at < @t", new { t = Time.Ms(now.AddDays(-180)) });
+                Dapper.SqlMapper.Execute(c, "DELETE FROM audit WHERE at < @t", new { t = Time.Ms(now.AddYears(-3)) });
+            }
+            catch (Exception e) { log.LogWarning(e, "Maintenance failed"); }
+            try { await Task.Delay(TimeSpan.FromHours(1), time, stoppingToken); } catch (OperationCanceledException) { }
+        }
+    }
+}
