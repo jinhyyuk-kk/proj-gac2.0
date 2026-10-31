@@ -15,6 +15,7 @@
     <Project Path="src/Gac.Server/Gac.Server.csproj" />
     <Project Path="src/Gac.Shared/Gac.Shared.csproj" />
     <Project Path="src/Gac.Tray.UI/Gac.Tray.UI.csproj" />
+    <Project Path="src/Gac.Tray/Gac.Tray.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Gac.Agent.Tests/Gac.Agent.Tests.csproj" />
