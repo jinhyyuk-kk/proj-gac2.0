@@ -1,0 +1,61 @@
+using Gac.Shared.Contracts;
+
+namespace Gac.Console.Services;
+
+/// <summary>
+/// Everything the Console needs from a GAC Server. <see cref="HttpGacServerClient"/> talks to a real server over the LAN;
+/// the demo supplies an in-memory fake (DemoServerClient) so GAC-Demo.exe runs the very same Console UI.
+/// </summary>
+public interface IGacServerClient : IDisposable
+{
+    bool IsDemo { get; }
+    string ServerDisplayName { get; }
+
+    Task<SetupStatus> GetSetupAsync();
+    Task<AccountInfo> CreateOwnerAsync(CreateOwnerRequest request);
+    Task<LoginResponse> LoginAsync(string userName, string password);
+    Task LogoutAsync();
+    Task ChangePasswordAsync(ChangePasswordRequest request);
+
+    Task<IReadOnlyList<AccountInfo>> GetAccountsAsync();
+    Task<AccountInfo> CreateAccountAsync(SaveAccountRequest request);
+    Task<AccountInfo> UpdateAccountAsync(int id, SaveAccountRequest request);
+    Task DeleteAccountAsync(int id);
+    Task ResetPasswordAsync(int id, string newPassword);
+
+    Task<IReadOnlyList<PcSummary>> GetPcsAsync();
+    Task MovePcsAsync(MovePcRequest request);
+    Task DeletePcAsync(string pcId);
+    Task<IReadOnlyList<PcGroup>> GetGroupsAsync();
+    Task<PcGroup> CreateGroupAsync(string name);
+    Task RenameGroupAsync(int id, string name);
+    Task DeleteGroupAsync(int id);
+    Task<GroupPolicy> GetGroupPolicyAsync(int groupId);
+    Task SaveGroupPolicyAsync(GroupPolicy policy);
+
+    Task<SendCommandResponse> SendCommandAsync(SendCommandRequest request);
+    Task<IReadOnlyList<CommandBatchSummary>> GetBatchesAsync(int limit = 100);
+    Task<IReadOnlyList<CommandRow>> GetBatchAsync(Guid batchId);
+    Task<IReadOnlyList<ReportRow>> GetReportsAsync(string? module, string? pcId, int limit = 200);
+    Task<IReadOnlyList<ReportRow>> GetLatestAsync(string module);
+
+    Task<SharedPresetInfo> GetSharedPresetsAsync();
+    Task SaveSharedPresetsAsync(string presetsJson);
+
+    Task<IReadOnlyList<DeployPackage>> GetPackagesAsync();
+    Task<DeployPackage> UploadPackageAsync(string name, string filePath, string silentArgs, IProgress<double>? progress, CancellationToken ct);
+    Task DeletePackageAsync(string id);
+
+    Task<IReadOnlyList<AuditEntry>> GetAuditAsync(int limit = 2000);
+    Task<ServerSettings> GetSettingsAsync();
+    Task SaveSettingsAsync(ServerSettings settings);
+    Task<EnrollmentInfo> GetEnrollmentAsync();
+    Task<EnrollmentInfo> RegenerateEnrollmentAsync();
+}
+
+/// <summary>A failure with a Korean message suitable for showing to the operator.</summary>
+public sealed class GacClientException(string message, int status = 0) : Exception(message)
+{
+    public int Status { get; } = status;
+    public bool SessionExpired => Status == 401;
+}

@@ -1,6 +1,7 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/Gac.Agent/Gac.Agent.csproj" />
+    <Project Path="src/Gac.Console/Gac.Console.csproj" />
     <Project Path="src/Gac.Modules.ClassMode/Gac.Modules.ClassMode.csproj" />
     <Project Path="src/Gac.Modules.Clean/Gac.Modules.Clean.csproj" />
     <Project Path="src/Gac.Modules.Deploy/Gac.Modules.Deploy.csproj" />

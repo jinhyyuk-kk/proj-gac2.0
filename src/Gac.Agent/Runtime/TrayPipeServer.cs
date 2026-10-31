@@ -52,7 +52,7 @@ public sealed class TrayPipeServer(ILogger<TrayPipeServer> log) : ITrayBridge
                         // otherwise another process owns it (squatting) and we refuse to serve under it.
                         listening = Create(security, first: _connections.IsEmpty);
                     }
-                    catch (UnauthorizedAccessException) when (_connections.IsEmpty)
+                    catch (UnauthorizedAccessException e) when (_connections.IsEmpty || e is PipeSquattingException)
                     {
                         log.LogError("Tray pipe name is already in use by another process (possible pipe squatting). Retrying in 30 s.");
                         try { await Task.Delay(TimeSpan.FromSeconds(30), ct); } catch (OperationCanceledException) { break; }
@@ -90,9 +90,30 @@ public sealed class TrayPipeServer(ILogger<TrayPipeServer> log) : ITrayBridge
         finally { listening?.Dispose(); }
     }
 
-    private static NamedPipeServerStream Create(PipeSecurity security, bool first) =>
-        NamedPipeServerStreamAcl.Create(PipeNames.Tray, PipeDirection.InOut, 32, PipeTransmissionMode.Byte,
+    /// <summary>
+    /// Creates an instance and verifies the pipe's security descriptor is owned by this service's own identity
+    /// (SYSTEM in production) or Administrators. If another process created the pipe name first (squatting), the
+    /// descriptor belongs to it and the instance is refused, whatever our own connection bookkeeping says.
+    /// </summary>
+    private static NamedPipeServerStream Create(PipeSecurity security, bool first)
+    {
+        var pipe = NamedPipeServerStreamAcl.Create(PipeNames.Tray, PipeDirection.InOut, 32, PipeTransmissionMode.Byte,
             PipeOptions.Asynchronous | PipeOptions.WriteThrough | (first ? PipeOptions.FirstPipeInstance : 0), 0, 0, security);
+        try
+        {
+            var owner = pipe.GetAccessControl().GetOwner(typeof(SecurityIdentifier)) as SecurityIdentifier;
+            using var me = WindowsIdentity.GetCurrent();
+            var admins = new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null);
+            if (owner == null || !(owner.Equals(me.User) || owner.Equals(admins)))
+                throw new PipeSquattingException(owner?.Value ?? "unknown");
+            return pipe;
+        }
+        catch
+        {
+            pipe.Dispose();
+            throw;
+        }
+    }
 
     private async Task ServeAsync(TrayConnection conn, CancellationToken ct)
     {
@@ -176,3 +197,5 @@ public sealed class TrayPipeServer(ILogger<TrayPipeServer> log) : ITrayBridge
         }
     }
 }
+
+public sealed class PipeSquattingException(string owner) : UnauthorizedAccessException($"Tray pipe is owned by {owner} (possible pipe squatting).");
