@@ -38,13 +38,25 @@ public sealed class TrayPipeServer(ILogger<TrayPipeServer> log) : ITrayBridge
     public async Task RunAsync(CancellationToken ct)
     {
         var security = CreateSecurity();
+        var first = true;
         while (!ct.IsCancellationRequested)
         {
             NamedPipeServerStream? pipe = null;
             try
             {
-                pipe = NamedPipeServerStreamAcl.Create(PipeNames.Tray, PipeDirection.InOut, 32, PipeTransmissionMode.Byte,
-                    PipeOptions.Asynchronous | PipeOptions.WriteThrough, 0, 0, security);
+                // The first instance must be ours: if another process already created the pipe name (squatting), this throws.
+                var options = PipeOptions.Asynchronous | PipeOptions.WriteThrough | (first ? PipeOptions.FirstPipeInstance : 0);
+                try
+                {
+                    pipe = NamedPipeServerStreamAcl.Create(PipeNames.Tray, PipeDirection.InOut, 32, PipeTransmissionMode.Byte, options, 0, 0, security);
+                }
+                catch (UnauthorizedAccessException) when (first)
+                {
+                    log.LogError("Tray pipe name is already in use by another process (possible pipe squatting). Retrying in 30 s.");
+                    await Task.Delay(TimeSpan.FromSeconds(30), ct);
+                    continue;
+                }
+                first = false;
                 await pipe.WaitForConnectionAsync(ct);
                 var conn = new TrayConnection(Guid.NewGuid(), pipe);
                 pipe = null;

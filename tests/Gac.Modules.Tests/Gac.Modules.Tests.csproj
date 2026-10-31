@@ -1,21 +1,26 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
-
+<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <Nullable>enable</Nullable>
+    <TargetFramework>net10.0-windows</TargetFramework>
     <IsPackable>false</IsPackable>
   </PropertyGroup>
-
   <ItemGroup>
     <PackageReference Include="coverlet.collector" Version="6.0.4" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
     <PackageReference Include="xunit" Version="2.9.3" />
     <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
   </ItemGroup>
-
+  <ItemGroup>
+    <ProjectReference Include="../../src/Gac.Modules.Clean/Gac.Modules.Clean.csproj" />
+    <ProjectReference Include="../../src/Gac.Modules.Shutdown/Gac.Modules.Shutdown.csproj" />
+    <ProjectReference Include="../../src/Gac.Modules.ClassMode/Gac.Modules.ClassMode.csproj" />
+    <ProjectReference Include="../../src/Gac.Modules.NetDiag/Gac.Modules.NetDiag.csproj" />
+    <ProjectReference Include="../../src/Gac.Modules.Errors/Gac.Modules.Errors.csproj" />
+    <ProjectReference Include="../../src/Gac.Modules.Update/Gac.Modules.Update.csproj" />
+    <ProjectReference Include="../../src/Gac.Modules.Deploy/Gac.Modules.Deploy.csproj" />
+    <ProjectReference Include="../../src/Gac.Modules.Health/Gac.Modules.Health.csproj" />
+    <ProjectReference Include="../../src/Gac.Modules.Inspect/Gac.Modules.Inspect.csproj" />
+  </ItemGroup>
   <ItemGroup>
     <Using Include="Xunit" />
   </ItemGroup>
-
 </Project>
