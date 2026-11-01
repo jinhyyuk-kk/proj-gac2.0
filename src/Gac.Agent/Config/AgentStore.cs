@@ -79,6 +79,15 @@ public sealed class AgentStore
         try { Directory.CreateDirectory(StateDir); WriteAtomic(PeriodsPath, GacJson.Serialize(periods)); } catch (IOException) { }
     }
 
+    private string CalendarPath => Path.Combine(StateDir, "calendar.json");
+    /// <summary>Last server time + next 60 days of lock exemption dates (CHANGE-002 §2.3), kept for offline use under
+    /// ProgramData (SYSTEM + Administrators only).</summary>
+    public AgentCalendar? LoadCalendar() => Read<AgentCalendar>(CalendarPath);
+    public void SaveCalendar(AgentCalendar calendar)
+    {
+        try { Directory.CreateDirectory(StateDir); WriteAtomic(CalendarPath, GacJson.Serialize(calendar)); } catch (IOException) { }
+    }
+
     public AgentState LoadState() { lock (_lock) return Read<AgentState>(StatePath) ?? new AgentState(); }
 
     public void UpdateState(Action<AgentState> change)

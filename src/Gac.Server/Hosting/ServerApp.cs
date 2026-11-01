@@ -72,6 +72,7 @@ public static class ServerApp
         builder.Services.AddSingleton(new Devices.DeviceGuard(knownHashes));
         builder.Services.AddSingleton(sp => new Devices.DeviceService(db, sp.GetRequiredService<AuditLog>(), sp.GetRequiredService<Devices.DeviceGuard>(), time));
         builder.Services.AddSingleton(sp => new Periods.PeriodService(db, sp.GetRequiredService<AuditLog>(), identity, time));
+        builder.Services.AddSingleton(sp => new Calendar.ExemptionService(db, sp.GetRequiredService<AuditLog>(), time));
         // Provision the single-use setup code at startup while no account exists, so sign-up can fail closed on its absence.
         new AccountService(db, new AuditLog(db, time), time).EnsureSetupCode();
         builder.Services.AddHostedService<MaintenanceService>();

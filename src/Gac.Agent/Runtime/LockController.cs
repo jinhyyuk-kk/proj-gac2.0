@@ -25,12 +25,19 @@ public sealed class LockController(ITrayBridge tray, TimeProvider time)
         tray.Broadcast(ServiceEvent.Unlock, new LockBody(periodId, "", 0));
     }
 
-    /// <summary>Reconcile the current active periods into lock / unlock events for the tray.</summary>
-    public void Reconcile(IReadOnlyList<PeriodPreset> periods)
+    /// <summary>Reconcile using the local clock and no exemption days (tests and legacy callers).</summary>
+    public void Reconcile(IReadOnlyList<PeriodPreset> periods) => Reconcile(periods, time.GetUtcNow(), exemptToday: false);
+
+    /// <summary>
+    /// Reconcile the current active periods into lock / unlock events for the tray. <paramref name="now"/> is the trusted
+    /// (server-anchored) time. On a lock exemption day (CHANGE-002 §2.2) <c>lock_pc</c> does not run at all: nothing is
+    /// locked, and any lock already shown (e.g. a PC left on overnight) is cleared so the tray closes it and restarts
+    /// explorer. The next day the same periods lock again.
+    /// </summary>
+    public void Reconcile(IReadOnlyList<PeriodPreset> periods, DateTimeOffset now, bool exemptToday)
     {
-        var now = time.GetUtcNow();
         var lockable = new List<(string Id, string Name)>();
-        foreach (var p in periods)
+        foreach (var p in exemptToday ? Array.Empty<PeriodPreset>() : periods)
         {
             if (!p.IsActive(now)) continue; // never lock for an expired/not-yet-started period (offline-persisted lists)
             ClassPreset? preset = null;
@@ -47,7 +54,8 @@ public sealed class LockController(ITrayBridge tray, TimeProvider time)
             // Clear periods that are no longer active (ended/stopped) from the showing + unlocked sets.
             toClear = _showing.Where(id => !active.Contains(id)).ToList();
             foreach (var id in toClear) _showing.Remove(id);
-            _unlocked.RemoveWhere(id => !active.Contains(id));
+            // An exemption day suspends locks without ending the period, so keep "unlocked this boot" decisions.
+            if (!exemptToday) _unlocked.RemoveWhere(id => !active.Contains(id));
             toLock = lockable.Where(x => !_unlocked.Contains(x.Id) && _showing.Add(x.Id)).ToList();
         }
         foreach (var id in toClear) tray.Broadcast(ServiceEvent.Unlock, new LockBody(id, "", 0));
@@ -55,9 +63,9 @@ public sealed class LockController(ITrayBridge tray, TimeProvider time)
     }
 
     /// <summary>Re-sends lock events for everything still locked (used when a tray reconnects).</summary>
-    public void Resend(IReadOnlyList<PeriodPreset> periods)
+    public void Resend(IReadOnlyList<PeriodPreset> periods, DateTimeOffset now, bool exemptToday)
     {
         lock (_lock) _showing.Clear();
-        Reconcile(periods);
+        Reconcile(periods, now, exemptToday);
     }
 }

@@ -49,7 +49,7 @@ public static class Endpoints
         app.UseWhen(c => c.Request.Path.StartsWithSegments("/api/agent"), b => b.Use(AgentAuthMiddleware));
         var agent = app.MapGroup("/api/agent");
 
-        agent.MapPost("/poll", (PollRequest req, HttpContext ctx, PcService pcs, CommandService commands, PolicyService policies, Devices.DeviceService devices, Periods.PeriodService periodsSvc) =>
+        agent.MapPost("/poll", (PollRequest req, HttpContext ctx, PcService pcs, CommandService commands, PolicyService policies, Devices.DeviceService devices, Periods.PeriodService periodsSvc, Calendar.ExemptionService exemptions) =>
         {
             var (agentId, key) = ((string, byte[]))ctx.Items[AgentKey]!;
             var ip = ctx.Connection.RemoteIpAddress?.ToString();
@@ -60,7 +60,8 @@ public static class Endpoints
             var (policy, ver) = policies.ForPc(pcs.GetGroupId(agentId));
             var cmds = commands.Deliver(agentId, key);
             var periods = periodsSvc.ActiveForPc(agentId, workPc: devices.IsWorkPc(agentId));
-            return Results.Ok(new PollResponse(cmds, req.PolicyVersion == ver ? null : policy, ver, policies.PollSeconds, Periods: periods));
+            // Server time + the next 60 days of lock exemption dates on every poll (CHANGE-002 §2.3).
+            return Results.Ok(new PollResponse(cmds, req.PolicyVersion == ver ? null : policy, ver, policies.PollSeconds, Periods: periods, Calendar: exemptions.ForAgent()));
         });
 
         agent.MapPost("/reports", (ReportUpload up, HttpContext ctx, CommandService commands) =>
@@ -207,6 +208,17 @@ public static class Endpoints
         api.MapPost("/periods", (CreatePeriodRequest req, HttpContext ctx, Periods.PeriodService p, PcService pcs) =>
             Need(ctx, Permission.ManagePresets) ?? Results.Ok(p.Create(S(ctx), req, groups => pcs.PcIdsInGroups(S(ctx), groups), pc => S(ctx).CanAccessGroup(pcs.GetGroupId(pc)))));
         api.MapPost("/periods/{id}/stop", (string id, HttpContext ctx, Periods.PeriodService p) => Need(ctx, Permission.ManagePresets) ?? Do(() => p.Stop(S(ctx), id)));
+
+        // calendar: lock exemption days (CHANGE-002 §2). Everyone with Console access can view; changes need 캘린더 관리.
+        api.MapGet("/calendar/exemptions", (Calendar.ExemptionService e) => Results.Ok(e.List()));
+        api.MapPost("/calendar/exemptions", (SaveExemptionDayRequest req, HttpContext ctx, Calendar.ExemptionService e) =>
+            Need(ctx, Permission.ManageCalendar) ?? Results.Ok(e.Save(S(ctx), null, req)));
+        api.MapPut("/calendar/exemptions/{id}", (string id, SaveExemptionDayRequest req, HttpContext ctx, Calendar.ExemptionService e) =>
+            Need(ctx, Permission.ManageCalendar) ?? Results.Ok(e.Save(S(ctx), id, req)));
+        api.MapDelete("/calendar/exemptions/{id}", (string id, HttpContext ctx, Calendar.ExemptionService e) =>
+            Need(ctx, Permission.ManageCalendar) ?? Do(() => e.Delete(S(ctx), id)));
+        api.MapPost("/calendar/exemptions/{id}/skip", (string id, SkipOccurrenceRequest req, HttpContext ctx, Calendar.ExemptionService e) =>
+            Need(ctx, Permission.ManageCalendar) ?? Do(() => e.Skip(S(ctx), id, req.Date)));
     }
 
     private static Session S(HttpContext ctx) => (Session)ctx.Items[SessionKey]!;

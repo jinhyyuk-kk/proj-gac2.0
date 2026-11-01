@@ -58,6 +58,35 @@ public sealed class AgentCore : IPackageSource
         Store.SavePeriods(Periods);
     }
 
+    /// <summary>Server-anchored clock: "today" for lock exemption never trusts the PC clock (CHANGE-002 §2.3).</summary>
+    public TrustedClock Clock { get; }
+    public IReadOnlyList<ExemptionDate> ExemptDates { get; private set; } = [];
+    private bool _tamperLogged;
+
+    public void SetCalendar(AgentCalendar? calendar)
+    {
+        if (calendar == null) return;
+        Clock.OnServerTime(calendar.ServerTime);
+        ExemptDates = calendar.ExemptDates ?? [];
+        Store.SaveCalendar(calendar);
+    }
+
+    /// <summary>Trusted now + whether today (Asia/Seoul) is a lock exemption day. Logs a suspected clock change once.</summary>
+    public (DateTimeOffset Now, bool Exempt) LockClock()
+    {
+        var (now, ignored) = Clock.Now();
+        if (ignored && !_tamperLogged) _log.LogWarning("Local clock differs from server time by more than {Minutes} minutes; ignoring the local clock for lock decisions", TrustedClock.TamperTolerance.TotalMinutes);
+        _tamperLogged = ignored;
+        return (now, ExemptionCalendar.IsExempt(ExemptDates, now));
+    }
+
+    /// <summary>Re-evaluate PC locks against the current periods, trusted time and exemption days.</summary>
+    public void ReconcileLocks()
+    {
+        var (now, exempt) = LockClock();
+        Lock.Reconcile(Periods, now, exempt);
+    }
+
     private Gac.Shared.Contracts.DeviceReport? _deviceCache;
     private DateTimeOffset _deviceCachedAt;
     /// <summary>Test seam: when set, the agent sends this report instead of probing the real machine.</summary>
@@ -89,6 +118,8 @@ public sealed class AgentCore : IPackageSource
         Shutdown = new ShutdownCoordinator(tray, shutdownExecutor ?? new WindowsShutdownExecutor(runner), time, OnShutdownLog);
         Lock = new LockController(tray, time);
         Periods = store.LoadPeriods(); // restore active locks across reboot/outage before the first poll
+        Clock = new TrustedClock(() => Environment.TickCount64, () => time.GetUtcNow());
+        if (store.LoadCalendar() is { } cal) { Clock.Restore(cal.ServerTime); ExemptDates = cal.ExemptDates ?? []; }
         _modules = moduleFactory(this).ToDictionary(m => m.Id);
         tray.Handler = HandleTrayAsync;
     }
@@ -188,7 +219,8 @@ public sealed class AgentCore : IPackageSource
         {
             case TrayRequest.Hello:
                 // A tray just connected (e.g. the user logged in): re-assert any active locks for this PC.
-                Lock.Resend(Periods);
+                var (lockNow, exempt) = LockClock();
+                Lock.Resend(Periods, lockNow, exempt);
                 return new PipeResponse(true, "ok");
             case TrayRequest.GetStatus:
             {

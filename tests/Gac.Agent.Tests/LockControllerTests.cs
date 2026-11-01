@@ -57,6 +57,53 @@ public class LockControllerTests
     }
 
     [Fact]
+    public void Exemption_day_suppresses_lock_even_with_an_active_period()
+    {
+        var tray = new FakeTray();
+        var c = new LockController(tray, TimeProvider.System);
+        c.Reconcile([Period("p1", PresetActionTypes.LockPc)], DateTimeOffset.Now, exemptToday: true);
+        Assert.DoesNotContain(tray.Events, e => e.Type == ServiceEvent.Lock);
+    }
+
+    [Fact]
+    public void Open_lock_closes_when_the_exemption_day_starts_and_locks_again_the_next_day()
+    {
+        var tray = new FakeTray();
+        var c = new LockController(tray, TimeProvider.System);
+        var periods = new[] { Period("p1", PresetActionTypes.LockPc) };
+        c.Reconcile(periods, DateTimeOffset.Now, exemptToday: false);   // PC left on overnight, locked
+        tray.Events.Clear();
+        c.Reconcile(periods, DateTimeOffset.Now, exemptToday: true);    // 00:00 of the exemption day
+        Assert.Contains(tray.Events, e => e.Type == ServiceEvent.Unlock && e.Body!.PeriodId == "p1");
+        tray.Events.Clear();
+        c.Reconcile(periods, DateTimeOffset.Now, exemptToday: true);    // stays unlocked all day
+        Assert.Empty(tray.Events);
+        c.Reconcile(periods, DateTimeOffset.Now, exemptToday: false);   // next day
+        Assert.Single(tray.Events, e => e.Type == ServiceEvent.Lock && e.Body!.PeriodId == "p1");
+    }
+
+    [Fact]
+    public void Agent_uses_server_time_not_a_tampered_local_clock_for_exemption()
+    {
+        var serverNow = new DateTimeOffset(2026, 11, 17, 1, 0, 0, TimeSpan.Zero); // 17th KST
+        var wall = serverNow.AddDays(1);                                          // student set the PC clock to the 18th
+        long tick = 0;
+        var clock = new TrustedClock(() => tick, () => wall);
+        clock.OnServerTime(serverNow);
+        var dates = new[] { new ExemptionDate(new DateOnly(2026, 11, 18), ExemptionCalendar.PresetName, "x") };
+        var (now, ignored) = clock.Now();
+        Assert.True(ignored);
+        Assert.False(ExemptionCalendar.IsExempt(dates, now));
+
+        var tray = new FakeTray();
+        var c = new LockController(tray, TimeProvider.System);
+        var p = new PeriodPreset("p1", "기말고사", GacJson.Serialize(new ClassPreset { Name = "x", Actions = [new() { Type = PresetActionTypes.LockPc }] }),
+            serverNow.AddDays(-1), serverNow.AddDays(3), "sig");
+        c.Reconcile([p], now, ExemptionCalendar.IsExempt(dates, now));
+        Assert.Single(tray.Events, e => e.Type == ServiceEvent.Lock); // lock still runs
+    }
+
+    [Fact]
     public void Period_ending_clears_the_lock()
     {
         var tray = new FakeTray();

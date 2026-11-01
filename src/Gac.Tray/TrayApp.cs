@@ -213,7 +213,8 @@ public sealed class TrayApp : ApplicationContext
         };
         form.ExitRequested += async (_, _) => await _pipe.RequestAsync(TrayRequest.ShutdownNow, null, TimeSpan.FromSeconds(10));
         form.Expired += async (_, _) => await _pipe.RequestAsync(TrayRequest.ShutdownNow, null, TimeSpan.FromSeconds(10));
-        form.FormClosed += (_, _) => { _locks.Remove(body.PeriodId); if (_locks.Count == 0) StopExplorerKiller(); };
+        // When the last lock closes for any reason (unlock, period end, exemption day starting) the desktop comes back.
+        form.FormClosed += (_, _) => { _locks.Remove(body.PeriodId); if (_locks.Count == 0) { StopExplorerKiller(); RestartExplorer(); } };
         _locks[body.PeriodId] = form;
         EndExplorer();
         StartExplorerKiller();
@@ -244,6 +245,11 @@ public sealed class TrayApp : ApplicationContext
 
     private static void RestartExplorer()
     {
+        // Starting explorer.exe while the shell is already running only opens a File Explorer window, so skip that case.
+        var session = System.Diagnostics.Process.GetCurrentProcess().SessionId;
+        var running = System.Diagnostics.Process.GetProcessesByName("explorer");
+        try { if (running.Any(p => p.SessionId == session)) return; }
+        finally { foreach (var p in running) p.Dispose(); }
         try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "explorer.exe")) { UseShellExecute = true }); }
         catch (Exception e) when (e is System.ComponentModel.Win32Exception or InvalidOperationException) { }
     }

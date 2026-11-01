@@ -67,7 +67,10 @@ public sealed class PeriodService(Db db, AuditLog audit, ServerIdentity identity
         return c.Query<Row>("SELECT p.*, (SELECT COUNT(*) FROM period_targets t WHERE t.period_id = p.id) AS n FROM periods p ORDER BY created_at DESC")
             .Select(r => new PeriodPresetInfo(r.id, r.name, Time.At(r.start_at), Time.At(r.end_at), r.started_by,
                 c.ExecuteScalar<int>("SELECT COUNT(*) FROM period_targets WHERE period_id = @id", new { id = r.id }),
-                r.stopped == 0 && Time.At(r.end_at) > now && Time.At(r.start_at) <= now, r.has_lock == 1)).ToList();
+                r.stopped == 0 && Time.At(r.end_at) > now && Time.At(r.start_at) <= now, r.has_lock == 1,
+                // target names for the calendar's period details (CHANGE-002 §2.1)
+                c.Query<string>("SELECT COALESCE(NULLIF(x.alias, ''), x.name) FROM period_targets t JOIN pcs x ON x.id = t.pc_id WHERE t.period_id = @id ORDER BY 1",
+                    new { id = r.id }).ToList())).ToList();
     }
 
     /// <summary>True when the period is running now and targets this PC (used to authorize an unlock request).</summary>

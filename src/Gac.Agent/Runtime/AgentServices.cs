@@ -77,7 +77,8 @@ public sealed class PollWorker(AgentCore core, TimeProvider time, ILogger<PollWo
         }
         core.SetDeviceApproved(true); // server accepted this device (lets the tray trust a UPS battery on a desktop)
         core.SetPeriods(resp.Periods);
-        core.Lock.Reconcile(core.Periods); // drive PC locks for active lock_pc periods (CHANGE-001 2.4)
+        core.SetCalendar(resp.Calendar); // server time + exemption days (CHANGE-002 §2.3)
+        core.ReconcileLocks(); // drive PC locks for active lock_pc periods (CHANGE-001 2.4), suspended on exemption days
         if (resp.Policy != null) core.ApplyPolicy(resp.Policy, resp.PolicyVersion);
 
         var rejections = new List<CommandRejection>();
@@ -147,6 +148,8 @@ public sealed class SchedulerWorker(AgentCore core, TimeProvider time, ILogger<S
     {
         var policy = core.Policy;
         await core.Shutdown.TickAsync(policy.Shutdown, ct);
+        // Exemption days start/end at midnight (Asia/Seoul) even while the server is unreachable (CHANGE-002 §2.2/2.3).
+        if (!core.Revoked) core.ReconcileLocks();
 
         var now = time.GetUtcNow();
         var state = core.Store.LoadState();

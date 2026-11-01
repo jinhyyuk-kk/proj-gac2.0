@@ -133,6 +133,18 @@ public sealed class Db
             id TEXT PRIMARY KEY, name TEXT NOT NULL, preset TEXT NOT NULL, has_lock INTEGER NOT NULL,
             start_at INTEGER NOT NULL, end_at INTEGER NOT NULL, started_by TEXT NOT NULL, created_at INTEGER NOT NULL, stopped INTEGER NOT NULL DEFAULT 0);
         CREATE TABLE IF NOT EXISTS period_targets (period_id TEXT NOT NULL REFERENCES periods(id) ON DELETE CASCADE, pc_id TEXT NOT NULL, PRIMARY KEY (period_id, pc_id));
+
+        -- CHANGE-002 §2: lock exemption days (rules; expanded for agents on every poll).
+        CREATE TABLE IF NOT EXISTS exemption_days (
+            id TEXT PRIMARY KEY, name TEXT NOT NULL, recurrence TEXT NOT NULL, date TEXT NOT NULL,
+            dom INTEGER NULL, nth INTEGER NULL, weekday INTEGER NULL, skipped TEXT NOT NULL DEFAULT '[]',
+            created_by TEXT NOT NULL, created_at INTEGER NOT NULL);
+
+        -- CHANGE-002 §4.3: overload alerts for the operator (queued until a Console reads them).
+        CREATE TABLE IF NOT EXISTS alerts (
+            id TEXT PRIMARY KEY, pc_alias TEXT NULL, windows_name TEXT NULL, ip TEXT NOT NULL, limit_kind TEXT NOT NULL,
+            request_count INTEGER NOT NULL, started_at INTEGER NOT NULL, blocked_until INTEGER NOT NULL, read INTEGER NOT NULL DEFAULT 0);
+        CREATE INDEX IF NOT EXISTS ix_alerts_started ON alerts(started_at);
         """;
 }
 
