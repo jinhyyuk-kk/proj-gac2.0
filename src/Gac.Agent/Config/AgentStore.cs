@@ -71,6 +71,14 @@ public sealed class AgentStore
     }
     public void SavePcPresets(string json) => WriteAtomic(PcPresetsPath, json);
 
+    private string PeriodsPath => Path.Combine(StateDir, "periods.json");
+    /// <summary>Last signed period list, so locks survive a reboot/outage before the first successful poll (CHANGE-001 2.4).</summary>
+    public IReadOnlyList<PeriodPreset> LoadPeriods() => Read<PeriodPreset[]>(PeriodsPath) ?? [];
+    public void SavePeriods(IReadOnlyList<PeriodPreset> periods)
+    {
+        try { Directory.CreateDirectory(StateDir); WriteAtomic(PeriodsPath, GacJson.Serialize(periods)); } catch (IOException) { }
+    }
+
     public AgentState LoadState() { lock (_lock) return Read<AgentState>(StatePath) ?? new AgentState(); }
 
     public void UpdateState(Action<AgentState> change)

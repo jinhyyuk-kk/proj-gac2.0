@@ -26,6 +26,10 @@ public sealed class DemoServerClient : IGacServerClient
     private readonly Dictionary<int, GroupPolicy> _policies = [];
     private ServerSettings _settings = new(null, null, @"C:\Windows\Web\Wallpaper\Windows\img0.jpg", ["Microsoft", "한컴", "Hancom", "Google Chrome", "Adobe Acrobat", "NVIDIA", "Intel", "Realtek", "AMD", "알집", "곰플레이어"], 30);
     private SharedPresetInfo _shared;
+    private PermissionMatrix _matrix = PermissionMatrix.Default();
+    private readonly List<BlockedDevice> _blocked = [];
+    private readonly List<PendingDevice> _pending = [];
+    private readonly List<PeriodPresetInfo> _periods = [];
     private string _code = "DEMO-2026-GAC0";
     private long _auditId;
     private int _nextAccountId = 5;
@@ -316,6 +320,67 @@ public sealed class DemoServerClient : IGacServerClient
         await Delay(150);
         lock (_lock) { _code = $"DEMO-{_rng.Next(1000, 9999)}-{_rng.Next(1000, 9999)}"; Audit("server.regenerate_enroll_code"); }
         return await GetEnrollmentAsync();
+    }
+
+    // ---- CHANGE-001: permission matrix, ownership, devices, aliases, periods ----
+    public async Task<PermissionMatrix> GetMatrixAsync() { await Delay(80); lock (_lock) return _matrix; }
+    public async Task SaveMatrixAsync(PermissionMatrix matrix) { await Delay(120); lock (_lock) { _matrix = matrix; Audit("accounts.permission_matrix"); } }
+
+    public async Task TransferOwnershipAsync(int toAccountId)
+    {
+        await Delay(150);
+        lock (_lock)
+        {
+            var target = _accounts.FirstOrDefault(a => a.Id == toAccountId) ?? throw new GacClientException("대상 계정을 찾을 수 없습니다.");
+            if (target.Id == Owner.Id) throw new GacClientException("자기 자신에게 소유권을 넘길 수 없습니다.");
+            var i0 = _accounts.FindIndex(a => a.Role == Role.Owner);
+            _accounts[i0] = _accounts[i0] with { Role = Role.Admin };
+            var it = _accounts.FindIndex(a => a.Id == toAccountId);
+            _accounts[it] = _accounts[it] with { Role = Role.Owner };
+            var owner = _accounts[it]; _accounts.RemoveAt(it); _accounts.Insert(0, owner);
+            Audit("account.transfer_ownership", target.UserName);
+        }
+    }
+
+    public async Task SetAliasAsync(string pcId, string? alias)
+    {
+        await Delay(100);
+        lock (_lock) { var pc = _pcs.First(p => p.Id == pcId); pc.Alias = string.IsNullOrWhiteSpace(alias) ? null : alias.Trim(); Audit("pc.alias", pc.Name, pc.Alias ?? "(지움)"); }
+    }
+
+    public async Task RevokePcAsync(string pcId) { await Delay(120); lock (_lock) { var pc = _pcs.First(p => p.Id == pcId); pc.Revoked = true; Audit("device.revoke", pc.Name); } }
+    public async Task RemoveWorkExemptionAsync(string pcId) { await Delay(100); lock (_lock) { var pc = _pcs.First(p => p.Id == pcId); pc.WorkPc = false; Audit("device.remove_work_exemption", pc.Name); } }
+
+    public async Task<IReadOnlyList<BlockedDevice>> GetBlockedDevicesAsync() { await Delay(100); lock (_lock) return _blocked.ToList(); }
+    public async Task<IReadOnlyList<PendingDevice>> GetPendingDevicesAsync() { await Delay(100); lock (_lock) return _pending.ToList(); }
+    public async Task ApproveDeviceAsync(string fingerprint) { await Delay(120); lock (_lock) { _pending.RemoveAll(d => d.Fingerprint == fingerprint); Audit("device.approve", fingerprint); } }
+    public async Task ClearConsoleFirstAsync(string fingerprint) { await Delay(120); lock (_lock) { _blocked.RemoveAll(d => d.Fingerprint == fingerprint && !d.PermanentlyBlocked); Audit("device.clear_console_first", fingerprint); } }
+
+    public async Task<IReadOnlyList<PeriodPresetInfo>> GetPeriodsAsync() { await Delay(90); lock (_lock) return _periods.ToList(); }
+
+    public async Task<PeriodPresetInfo> CreatePeriodAsync(CreatePeriodRequest r)
+    {
+        await Delay(200);
+        var (file, result) = PresetValidator.Parse(r.PresetJson.TrimStart().StartsWith('{') && r.PresetJson.Contains("\"presets\"") ? r.PresetJson : $"{{\"version\":1,\"presets\":[{r.PresetJson}]}}", allowRunCommand: true);
+        if (file == null || file.Presets.Count != 1) throw new GacClientException(file == null ? result.ErrorText : "프리셋은 하나만 담아야 합니다.");
+        if (r.Days is < 1 or > 400) throw new GacClientException("기간은 1~400일이어야 합니다.");
+        var targets = r.PcIds.Count + (r.GroupIds?.Sum(g => _pcs.Count(p => p.GroupId == g)) ?? 0);
+        if (targets == 0) throw new GacClientException("대상 PC를 선택하세요.");
+        var hasLock = file.Presets[0].Actions.Any(a => a.Type == PresetActionTypes.LockPc);
+        var start = r.StartAt == default ? DateTimeOffset.Now : r.StartAt;
+        var info = new PeriodPresetInfo(Guid.NewGuid().ToString("N"), r.PeriodName, start, start.AddDays(r.Days), Owner.UserName, targets, true, hasLock);
+        lock (_lock) { _periods.Insert(0, info); Audit("period.create", r.PeriodName, $"{targets} PCs, {r.Days}d, lock={hasLock}"); }
+        return info;
+    }
+
+    public async Task StopPeriodAsync(string id)
+    {
+        await Delay(120);
+        lock (_lock)
+        {
+            var i = _periods.FindIndex(p => p.Id == id);
+            if (i >= 0) { _periods[i] = _periods[i] with { Running = false }; Audit("period.stop", _periods[i].PeriodName); }
+        }
     }
 
     public void Dispose() { }

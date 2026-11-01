@@ -27,7 +27,7 @@ public class LockControllerTests
     public void Lock_event_sent_once_for_active_lock_period()
     {
         var tray = new FakeTray();
-        var c = new LockController(tray);
+        var c = new LockController(tray, TimeProvider.System);
         var periods = new[] { Period("p1", PresetActionTypes.Mute, PresetActionTypes.LockPc) };
         c.Reconcile(periods);
         c.Reconcile(periods); // repeated polls must not re-send
@@ -38,7 +38,7 @@ public class LockControllerTests
     public void Period_without_lock_does_not_lock()
     {
         var tray = new FakeTray();
-        new LockController(tray).Reconcile([Period("p1", PresetActionTypes.Mute)]);
+        new LockController(tray, TimeProvider.System).Reconcile([Period("p1", PresetActionTypes.Mute)]);
         Assert.DoesNotContain(tray.Events, e => e.Type == ServiceEvent.Lock);
     }
 
@@ -46,7 +46,7 @@ public class LockControllerTests
     public void Unlock_lifts_the_lock_until_period_ends_and_does_not_relock()
     {
         var tray = new FakeTray();
-        var c = new LockController(tray);
+        var c = new LockController(tray, TimeProvider.System);
         var periods = new[] { Period("p1", PresetActionTypes.LockPc) };
         c.Reconcile(periods);
         c.MarkUnlocked("p1");
@@ -60,7 +60,7 @@ public class LockControllerTests
     public void Period_ending_clears_the_lock()
     {
         var tray = new FakeTray();
-        var c = new LockController(tray);
+        var c = new LockController(tray, TimeProvider.System);
         c.Reconcile([Period("p1", PresetActionTypes.LockPc)]);
         tray.Events.Clear();
         c.Reconcile([]); // period no longer active

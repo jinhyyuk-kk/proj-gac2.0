@@ -23,10 +23,15 @@ public sealed class DemoPc
     public string Edition { get; init; } = "Windows 11 Education";
     public DateTimeOffset LastSeen { get; set; } = DateTimeOffset.Now;
     public List<string> ExtraPrograms { get; } = [];
+    public string? Alias { get; set; }
+    public bool WorkPc { get; set; }
+    public bool Revoked { get; set; }
 
     public PcSummary ToSummary(IReadOnlyList<PcGroup> groups) =>
-        new(Id, Name, GroupId, groups.FirstOrDefault(g => g.Id == GroupId)?.Name, Online, Online ? DateTimeOffset.Now.AddSeconds(-new Random(Name.GetHashCode()).Next(3, 40)) : LastSeen,
-            Ip, "Windows 10.0.22631", User, "2.0.0", Math.Round(FreePercent, 1), PendingUpdates, RecentErrors, RebootRequired);
+        new(Id, string.IsNullOrWhiteSpace(Alias) ? Name : Alias!, GroupId, groups.FirstOrDefault(g => g.Id == GroupId)?.Name,
+            Online, Online ? DateTimeOffset.Now.AddSeconds(-new Random(Name.GetHashCode()).Next(3, 40)) : LastSeen,
+            Ip, "Windows 10.0.22631", User, "2.0.0", Math.Round(FreePercent, 1), PendingUpdates, RecentErrors, RebootRequired,
+            Name, WorkPc, Revoked, string.IsNullOrWhiteSpace(Alias) ? null : Alias);
 }
 
 /// <summary>A believable fake school: about 20 PCs with varied states.</summary>

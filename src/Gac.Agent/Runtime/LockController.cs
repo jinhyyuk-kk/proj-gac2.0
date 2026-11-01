@@ -12,7 +12,7 @@ namespace Gac.Agent.Runtime;
 /// been unlocked this boot, and to clear the lock when the period ends or is unlocked. Work PCs never receive a lock
 /// because the server strips <c>lock_pc</c> from their period presets before delivery.
 /// </summary>
-public sealed class LockController(ITrayBridge tray)
+public sealed class LockController(ITrayBridge tray, TimeProvider time)
 {
     private const int CountdownMinutes = 3;
     private readonly Lock _lock = new();
@@ -28,9 +28,11 @@ public sealed class LockController(ITrayBridge tray)
     /// <summary>Reconcile the current active periods into lock / unlock events for the tray.</summary>
     public void Reconcile(IReadOnlyList<PeriodPreset> periods)
     {
+        var now = time.GetUtcNow();
         var lockable = new List<(string Id, string Name)>();
         foreach (var p in periods)
         {
+            if (!p.IsActive(now)) continue; // never lock for an expired/not-yet-started period (offline-persisted lists)
             ClassPreset? preset = null;
             try { preset = GacJson.Deserialize<ClassPreset>(p.PresetJson); } catch { }
             if (preset != null && preset.Actions.Any(a => a.Type == PresetActionTypes.LockPc))

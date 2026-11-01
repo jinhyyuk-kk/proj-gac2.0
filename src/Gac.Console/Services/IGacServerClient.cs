@@ -1,3 +1,4 @@
+using Gac.Shared.Auth;
 using Gac.Shared.Contracts;
 
 namespace Gac.Console.Services;
@@ -22,10 +23,25 @@ public interface IGacServerClient : IDisposable
     Task<AccountInfo> UpdateAccountAsync(int id, SaveAccountRequest request);
     Task DeleteAccountAsync(int id);
     Task ResetPasswordAsync(int id, string newPassword);
+    Task<PermissionMatrix> GetMatrixAsync();
+    Task SaveMatrixAsync(PermissionMatrix matrix);
+    Task TransferOwnershipAsync(int toAccountId);
 
     Task<IReadOnlyList<PcSummary>> GetPcsAsync();
     Task MovePcsAsync(MovePcRequest request);
     Task DeletePcAsync(string pcId);
+    Task SetAliasAsync(string pcId, string? alias);
+    Task RevokePcAsync(string pcId);
+    Task RemoveWorkExemptionAsync(string pcId);
+
+    Task<IReadOnlyList<BlockedDevice>> GetBlockedDevicesAsync();
+    Task<IReadOnlyList<PendingDevice>> GetPendingDevicesAsync();
+    Task ApproveDeviceAsync(string fingerprint);
+    Task ClearConsoleFirstAsync(string fingerprint);
+
+    Task<IReadOnlyList<PeriodPresetInfo>> GetPeriodsAsync();
+    Task<PeriodPresetInfo> CreatePeriodAsync(CreatePeriodRequest request);
+    Task StopPeriodAsync(string id);
     Task<IReadOnlyList<PcGroup>> GetGroupsAsync();
     Task<PcGroup> CreateGroupAsync(string name);
     Task RenameGroupAsync(int id, string name);

@@ -10,7 +10,7 @@ namespace Gac.Agent.Runtime;
 /// service relaunches it (in that user's session, with their own rights) within a few seconds. The tray has no "exit"
 /// item; lock/preset state lives in the service, so killing the tray never clears it.
 /// </summary>
-public sealed class TrayWatchdog(ILogger<TrayWatchdog> log) : BackgroundService
+public sealed class TrayWatchdog(TrayPipeServer pipe, ILogger<TrayWatchdog> log) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -30,10 +30,8 @@ public sealed class TrayWatchdog(ILogger<TrayWatchdog> log) : BackgroundService
     {
         var session = WTSGetActiveConsoleSessionId();
         if (session == 0xFFFFFFFF) return; // no active console session
-        // A tray already in that session? Then nothing to do.
-        foreach (var p in Process.GetProcessesByName("Gac.Tray"))
-            using (p)
-                try { if ((uint)p.SessionId == session) return; } catch { }
+        // Trust a tray only if a real one is connected to our pipe (a process merely *named* Gac.Tray proves nothing).
+        if (pipe.ConnectedTrays > 0) return;
 
         if (!WTSQueryUserToken(session, out var userToken)) return; // no interactive user logged on
         try

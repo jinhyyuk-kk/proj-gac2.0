@@ -49,9 +49,14 @@ public sealed class AgentCore : IPackageSource
         catch (IOException) { }
     }
 
-    /// <summary>Signed period presets currently active for this PC (CHANGE-001 2.3/2.4), refreshed on each poll.</summary>
+    /// <summary>Signed period presets currently active for this PC (CHANGE-001 2.3/2.4), refreshed on each poll and
+    /// persisted so locks survive a reboot/outage before the first successful poll.</summary>
     public IReadOnlyList<Gac.Shared.Contracts.PeriodPreset> Periods { get; private set; } = [];
-    public void SetPeriods(IReadOnlyList<Gac.Shared.Contracts.PeriodPreset>? periods) => Periods = periods ?? [];
+    public void SetPeriods(IReadOnlyList<Gac.Shared.Contracts.PeriodPreset>? periods)
+    {
+        Periods = periods ?? [];
+        Store.SavePeriods(Periods);
+    }
 
     private Gac.Shared.Contracts.DeviceReport? _deviceCache;
     private DateTimeOffset _deviceCachedAt;
@@ -82,7 +87,8 @@ public sealed class AgentCore : IPackageSource
         _identity = store.LoadIdentity();
         _netRepair = new NetRepairService(runner);
         Shutdown = new ShutdownCoordinator(tray, shutdownExecutor ?? new WindowsShutdownExecutor(runner), time, OnShutdownLog);
-        Lock = new LockController(tray);
+        Lock = new LockController(tray, time);
+        Periods = store.LoadPeriods(); // restore active locks across reboot/outage before the first poll
         _modules = moduleFactory(this).ToDictionary(m => m.Id);
         tray.Handler = HandleTrayAsync;
     }

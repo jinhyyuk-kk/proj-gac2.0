@@ -49,10 +49,25 @@ public sealed class HttpGacServerClient : IGacServerClient
     public Task<AccountInfo> UpdateAccountAsync(int id, SaveAccountRequest r) => Send<AccountInfo>(HttpMethod.Put, $"/api/accounts/{id}", r);
     public Task DeleteAccountAsync(int id) => Send<object>(HttpMethod.Delete, $"/api/accounts/{id}", null);
     public Task ResetPasswordAsync(int id, string pw) => Send<object>(HttpMethod.Post, $"/api/accounts/{id}/password", new ResetPasswordRequest(pw));
+    public Task<Gac.Shared.Auth.PermissionMatrix> GetMatrixAsync() => Get<Gac.Shared.Auth.PermissionMatrix>("/api/accounts/matrix");
+    public Task SaveMatrixAsync(Gac.Shared.Auth.PermissionMatrix m) => Send<object>(HttpMethod.Put, "/api/accounts/matrix", m);
+    public Task TransferOwnershipAsync(int toAccountId) => Send<object>(HttpMethod.Post, $"/api/accounts/{toAccountId}/transfer-ownership", null);
 
     public Task<IReadOnlyList<PcSummary>> GetPcsAsync() => GetList<PcSummary>("/api/pcs");
     public Task MovePcsAsync(MovePcRequest r) => Send<object>(HttpMethod.Post, "/api/pcs/move", r);
     public Task DeletePcAsync(string pcId) => Send<object>(HttpMethod.Delete, $"/api/pcs/{Uri.EscapeDataString(pcId)}", null);
+    public Task SetAliasAsync(string pcId, string? alias) => Send<object>(HttpMethod.Put, $"/api/pcs/{Uri.EscapeDataString(pcId)}/alias", new SetAliasRequest(alias));
+    public Task RevokePcAsync(string pcId) => Send<object>(HttpMethod.Post, $"/api/pcs/{Uri.EscapeDataString(pcId)}/revoke", null);
+    public Task RemoveWorkExemptionAsync(string pcId) => Send<object>(HttpMethod.Post, $"/api/pcs/{Uri.EscapeDataString(pcId)}/remove-work-exemption", null);
+
+    public Task<IReadOnlyList<BlockedDevice>> GetBlockedDevicesAsync() => GetList<BlockedDevice>("/api/devices/blocked");
+    public Task<IReadOnlyList<PendingDevice>> GetPendingDevicesAsync() => GetList<PendingDevice>("/api/devices/pending");
+    public Task ApproveDeviceAsync(string fp) => Send<object>(HttpMethod.Post, $"/api/devices/{Uri.EscapeDataString(fp)}/approve", null);
+    public Task ClearConsoleFirstAsync(string fp) => Send<object>(HttpMethod.Post, $"/api/devices/{Uri.EscapeDataString(fp)}/clear-console-first", null);
+
+    public Task<IReadOnlyList<PeriodPresetInfo>> GetPeriodsAsync() => GetList<PeriodPresetInfo>("/api/periods");
+    public Task<PeriodPresetInfo> CreatePeriodAsync(CreatePeriodRequest r) => Send<PeriodPresetInfo>(HttpMethod.Post, "/api/periods", r);
+    public Task StopPeriodAsync(string id) => Send<object>(HttpMethod.Post, $"/api/periods/{Uri.EscapeDataString(id)}/stop", null);
     public Task<IReadOnlyList<PcGroup>> GetGroupsAsync() => GetList<PcGroup>("/api/groups");
     public Task<PcGroup> CreateGroupAsync(string name) => Send<PcGroup>(HttpMethod.Post, "/api/groups", new SaveGroupRequest(name));
     public Task RenameGroupAsync(int id, string name) => Send<object>(HttpMethod.Put, $"/api/groups/{id}", new SaveGroupRequest(name));
