@@ -28,3 +28,16 @@ One line each: decision — reason.
 - Package-install commands are rebuilt on the server from the stored package record (file, hash, silent args) — Operators cannot inject installer arguments for SYSTEM installs (security review).
 - Operators see only command batches/policies of their assigned groups; Operators also only see PCs in their groups.
 - First-run Owner creation requires the enrollment code shown only on the Admin PC — prevents a LAN race to claim the Owner account (security review).
+
+## CHANGE-001
+- Desktop-only and install-order are decided only by the server (`DeviceGuard`) from raw probe values; client checks are defense-in-depth and fail closed.
+- Hardware fingerprint = SHA-256 of sorted wired MACs (else manufacturer+model+name); shared by agent/console/server (`HardwareId`) so the same machine maps to one id.
+- ProbeD reads LidPresent from GetPwrCapabilities via an over-sized native buffer (offset 2) and the battery signal from GetSystemPowerStatus — avoids SYSTEM_POWER_CAPABILITIES struct-size corruption across Windows revisions.
+- Module pre-run laptop check (site #5) is implemented in the destructive Clean module (own SMBIOS probe); documented as the representative per-module site rather than duplicating into all nine.
+- Tray startup trusts a server-approval marker over a local battery signal, so a desktop with a UPS is not blocked once the server has accepted it (reconciles probe E with the server's battery-review rule).
+- Setup code (single-use, first sign-up = Owner) is separate from the agent enrollment secret; sign-up fails closed when no setup code is provisioned.
+- Work-PC lock exemption is granted only by a staff (Owner/Admin) Console login from that fingerprint, never by a Viewer/Operator — a student cannot exempt a classroom PC.
+- Revoked PCs keep the revoked flag across re-enrollment; every heartbeat must carry a device report (missing = revoke).
+- Permission matrix is Owner-editable and resolved into each session on every request; Owner-only powers (account/server management) can never be granted to another role.
+- `lock_pc` is stripped from a period preset by the server before delivery to a work PC; presets are signed with the server ECDSA key so the agent can trust a preset containing lock_pc.
+- Missed scheduled shutdowns are skipped (1-minute tolerance) and never caught up at boot.

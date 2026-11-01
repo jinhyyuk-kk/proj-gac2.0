@@ -38,6 +38,32 @@ Items marked **manual** need real hardware or a clean VM and have **not** been v
 - `LICENSE` (MIT, JH, 2026); `docs/INSTALL.md`.
 - **Manual:** clean Windows 10/11 VM without internet: demo from USB, install all three from `/dist`, uninstall leaves nothing behind.
 
+## CHANGE-001 (in progress)
+
+Applied so far (all tested — 174 automated tests passing):
+- **Desktop-only, server-enforced (1.1–1.3):** five hardware probes + report collector; server `DeviceGuard` decides at
+  enrollment, heartbeat and command dispatch; fails closed on missing/inconsistent data; integrity-hash check; wired-only
+  enrollment; permanent block for mobile/portable; battery-only → "확인 필요"; per-agent key bound to fingerprint; revoke.
+- **Distributed client checks + tamper test (1.1, 8):** installer (A+D), service startup (B+C), tray startup (A+E),
+  Clean module pre-run (SMBIOS), enrollment collector (all five), heartbeat report. `Gac.Tamper.Tests` fails if any site is removed.
+- **Install order (1.4):** console markers + tombstone (Console installer), agent installer refusal, server enforcement.
+- **Accounts (4–5):** single-use setup code, first sign-up = Owner (transactional/concurrent-safe), sign-up closes,
+  ownership transfer, Owner-editable permission matrix (effective next request), unlock authorization + permission.
+- **PC aliases (3):** server-side alias, never renames Windows; shown large with the Windows name.
+- **Period presets + lock_pc (2.3–2.4, server):** PeriodService create/stop/deliver, ECDSA-signed, `lock_pc` stripped
+  for work PCs; `lock_pc` rejected in teacher presets; unlock endpoint authorizes on the server and audits the account.
+- **Missed shutdown (2.5):** skipped and logged, never caught up at boot.
+
+Remaining (not yet built) — mostly WinForms UI and installer/runtime integration, hard to verify without real hardware:
+- Server LAN-range auto-detect + single-range firewall rule; **GAC 서버 상태** app (6); rollout package export (2).
+- Client no-login + presets stored per PC in ProgramData (2.1); tray watchdog restart by the service (2.2).
+- `lock_pc` client execution (lock window + live countdown + unlock dialog via pipe→service→server).
+- Console UI: sign-up/login two-button screen, account dashboard + matrix editor + transfer, 차단된 기기 / 확인 필요 lists,
+  alias editing, period create/stop, 업무용 PC marking.
+- Demo three-view picker (console / server / client) (7).
+- `CLAUDE.md` sync (9) and moving `CHANGE-001.md` to `docs/changes/` once complete.
+- Remaining section-8 tests: HTTP enrollment-rejection e2e, lock_pc client behavior, watchdog, demo no-touch for new paths.
+
 ## Known limitations
 - Binaries are not code-signed (SmartScreen warning documented).
 - Teacher personal presets in `%APPDATA%` are kept on uninstall (user data).
