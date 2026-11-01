@@ -64,6 +64,14 @@ public static class ServerApp
         builder.Services.AddSingleton<PolicyService>();
         builder.Services.AddSingleton<EnrollThrottle>();
         builder.Services.AddSingleton(sp => new PackageStore(db, sp.GetRequiredService<AuditLog>(), time, options.PackagesDir));
+        // Known official release hashes (one SHA-256 per line) enable the integrity check; absent file = check skipped.
+        var hashFile = Path.Combine(options.DataDir, "release-hashes.txt");
+        var knownHashes = File.Exists(hashFile)
+            ? File.ReadAllLines(hashFile).Select(l => l.Trim().ToUpperInvariant()).Where(l => l.Length == 64).ToHashSet()
+            : new HashSet<string>();
+        builder.Services.AddSingleton(new Devices.DeviceGuard(knownHashes));
+        builder.Services.AddSingleton(sp => new Devices.DeviceService(db, sp.GetRequiredService<AuditLog>(), sp.GetRequiredService<Devices.DeviceGuard>(), time));
+        builder.Services.AddSingleton(sp => new Periods.PeriodService(db, sp.GetRequiredService<AuditLog>(), identity, time));
         builder.Services.AddHostedService<MaintenanceService>();
 
         var app = builder.Build();

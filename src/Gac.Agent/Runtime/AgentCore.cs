@@ -30,6 +30,31 @@ public sealed class AgentCore : IPackageSource
     public AgentPolicy Policy { get; private set; }
     public string Version { get; } = typeof(AgentCore).Assembly.GetName().Version?.ToString(3) ?? "2.0.0";
 
+    /// <summary>Set when the server revokes this agent (laptop found later, tampering, or Owner revoke). Modules stop running.</summary>
+    public bool Revoked { get; private set; }
+    public string? RevokedReason { get; private set; }
+    public void MarkRevoked(string reason) { Revoked = true; RevokedReason = reason; }
+
+    /// <summary>Signed period presets currently active for this PC (CHANGE-001 2.3/2.4), refreshed on each poll.</summary>
+    public IReadOnlyList<Gac.Shared.Contracts.PeriodPreset> Periods { get; private set; } = [];
+    public void SetPeriods(IReadOnlyList<Gac.Shared.Contracts.PeriodPreset>? periods) => Periods = periods ?? [];
+
+    private Gac.Shared.Contracts.DeviceReport? _deviceCache;
+    private DateTimeOffset _deviceCachedAt;
+    /// <summary>Test seam: when set, the agent sends this report instead of probing the real machine.</summary>
+    public Func<Gac.Shared.Contracts.DeviceReport>? DeviceReportOverride { get; set; }
+    /// <summary>A cached full device report (probes/markers/integrity), refreshed hourly, sent with enroll and every heartbeat.</summary>
+    public Gac.Shared.Contracts.DeviceReport DeviceReport()
+    {
+        if (DeviceReportOverride != null) return DeviceReportOverride();
+        if (_deviceCache == null || _time.GetUtcNow() - _deviceCachedAt > TimeSpan.FromHours(1))
+        {
+            _deviceCache = Hardware.DeviceReportCollector.Collect();
+            _deviceCachedAt = _time.GetUtcNow();
+        }
+        return _deviceCache;
+    }
+
     public AgentCore(AgentStore store, TrayPipeServer tray, IProcessRunner runner, TimeProvider time, ILogger<AgentCore> log,
         Func<AgentCore, IEnumerable<IAgentModule>> moduleFactory, IShutdownExecutor? shutdownExecutor = null)
     {

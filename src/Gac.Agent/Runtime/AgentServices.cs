@@ -65,9 +65,16 @@ public sealed class PollWorker(AgentCore core, TimeProvider time, ILogger<PollWo
     internal async Task PollOnceAsync(ServerClient client, CancellationToken ct, Action<int> setPoll)
     {
         var state = core.Store.LoadState();
-        var resp = await client.PollAsync(new PollRequest(core.Version, Sessions.ActiveUser(), LocalIp(), Environment.OSVersion.VersionString, core.Queue.Count, state.PolicyVersion), ct);
+        var resp = await client.PollAsync(new PollRequest(core.Version, Sessions.ActiveUser(), LocalIp(), Environment.OSVersion.VersionString, core.Queue.Count, state.PolicyVersion, core.DeviceReport()), ct);
         core.Store.UpdateState(s => s.LastServerContact = time.GetUtcNow());
         setPoll(resp.PollSeconds);
+        if (resp.Revoked)
+        {
+            core.MarkRevoked(resp.RevokedReason ?? "이 PC는 관리 대상에서 제외되었습니다.");
+            core.SetPeriods([]);
+            return; // stop processing commands/periods
+        }
+        core.SetPeriods(resp.Periods);
         if (resp.Policy != null) core.ApplyPolicy(resp.Policy, resp.PolicyVersion);
 
         var rejections = new List<CommandRejection>();

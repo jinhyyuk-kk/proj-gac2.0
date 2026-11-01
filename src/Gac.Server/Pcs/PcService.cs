@@ -16,6 +16,7 @@ public sealed class PcService(Db db, SettingsStore settings, AuditLog audit, Tim
     {
         public string id = ""; public string name = ""; public long? group_id; public string? group_name; public long? last_seen;
         public string? ip; public string? os; public string? logged_on_user; public string? agent_version;
+        public string? alias; public long work_pc; public long revoked;
     }
 
     public string EnrollCode
@@ -46,7 +47,7 @@ public sealed class PcService(Db db, SettingsStore settings, AuditLog audit, Tim
     /// current key (HMAC over a re-enroll message); otherwise a new record is always created. Client-supplied names or
     /// MAC addresses never select an existing identity.
     /// </summary>
-    public (string AgentId, byte[] Key) Enroll(EnrollRequest req)
+    public (string AgentId, byte[] Key) Enroll(EnrollRequest req, string? fingerprint = null)
     {
         var key = RandomNumberGenerator.GetBytes(32);
         var name = (req.MachineName ?? "").Trim();
@@ -60,13 +61,19 @@ public sealed class PcService(Db db, SettingsStore settings, AuditLog audit, Tim
         using var c = db.Open();
         var id = existing ?? Guid.NewGuid().ToString("N");
         if (existing == null)
-            c.Execute("INSERT INTO pcs(id, name, agent_key, enrolled_at, os, agent_version, mac) VALUES(@id, @name, @key, @now, @os, @ver, @mac)",
-                new { id, name, key = Convert.ToBase64String(key), now = Time.Ms(time.GetUtcNow()), os = req.OsVersion, ver = req.AgentVersion, mac = req.MacAddress });
+            c.Execute("INSERT INTO pcs(id, name, agent_key, enrolled_at, os, agent_version, mac, fingerprint, revoked) VALUES(@id, @name, @key, @now, @os, @ver, @mac, @fp, 0)",
+                new { id, name, key = Convert.ToBase64String(key), now = Time.Ms(time.GetUtcNow()), os = req.OsVersion, ver = req.AgentVersion, mac = req.MacAddress, fp = fingerprint });
         else
-            c.Execute("UPDATE pcs SET agent_key = @key, os = @os, agent_version = @ver, mac = @mac WHERE id = @id",
-                new { id, key = Convert.ToBase64String(key), os = req.OsVersion, ver = req.AgentVersion, mac = req.MacAddress });
+            c.Execute("UPDATE pcs SET agent_key = @key, os = @os, agent_version = @ver, mac = @mac, fingerprint = COALESCE(@fp, fingerprint), revoked = 0 WHERE id = @id",
+                new { id, key = Convert.ToBase64String(key), os = req.OsVersion, ver = req.AgentVersion, mac = req.MacAddress, fp = fingerprint });
         audit.Write("agent:" + name, existing == null ? "pc.enroll" : "pc.reenroll", name);
         return (id, key);
+    }
+
+    public bool IsRevoked(string agentId)
+    {
+        using var c = db.Open();
+        return c.QuerySingleOrDefault<long>("SELECT revoked FROM pcs WHERE id = @agentId", new { agentId }) == 1;
     }
 
     public byte[]? GetAgentKey(string agentId)
@@ -110,9 +117,30 @@ public sealed class PcService(Db db, SettingsStore settings, AuditLog audit, Tim
                     errors = er.Events.Sum(x => x.Count) + er.FailedServices.Count;
             }
             var lastSeen = Time.At(r.last_seen);
-            return new PcSummary(r.id, r.name, (int?)r.group_id, r.group_name, lastSeen.HasValue && now - lastSeen.Value < OnlineWindow, lastSeen,
-                r.ip, r.os, r.logged_on_user, r.agent_version, minFree, pending, errors, reboot);
+            var display = string.IsNullOrWhiteSpace(r.alias) ? r.name : r.alias!;
+            return new PcSummary(r.id, display, (int?)r.group_id, r.group_name, lastSeen.HasValue && now - lastSeen.Value < OnlineWindow, lastSeen,
+                r.ip, r.os, r.logged_on_user, r.agent_version, minFree, pending, errors, reboot, r.name, r.work_pc == 1, r.revoked == 1, string.IsNullOrWhiteSpace(r.alias) ? null : r.alias);
         }).ToList();
+    }
+
+    /// <summary>Sets or clears a PC's alias (CHANGE-001 section 3). Never changes the Windows computer name.</summary>
+    public void SetAlias(Session actor, string pcId, string? alias)
+    {
+        alias = string.IsNullOrWhiteSpace(alias) ? null : alias.Trim();
+        if (alias is { Length: > 64 }) throw new GacException("별명은 64자 이하여야 합니다.");
+        using var c = db.Open();
+        var name = c.QuerySingleOrDefault<string>("SELECT name FROM pcs WHERE id = @pcId", new { pcId }) ?? throw new GacException("PC를 찾을 수 없습니다.", 404);
+        c.Execute("UPDATE pcs SET alias = @alias WHERE id = @pcId", new { alias, pcId });
+        audit.Write(actor.UserName, "pc.alias", name, alias ?? "(별명 지움)");
+    }
+
+    /// <summary>PC ids in the given groups the session may access (used when targeting period presets by group).</summary>
+    public IReadOnlyList<string> PcIdsInGroups(Session s, IEnumerable<int> groupIds)
+    {
+        var ids = groupIds.Where(g => s.CanAccessGroup(g)).Distinct().ToList();
+        if (ids.Count == 0) return [];
+        using var c = db.Open();
+        return c.Query<string>("SELECT id FROM pcs WHERE group_id IN @ids", new { ids }).ToList();
     }
 
     public void Move(Session actor, MovePcRequest req)

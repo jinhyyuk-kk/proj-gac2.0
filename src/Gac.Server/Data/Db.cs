@@ -26,6 +26,17 @@ public sealed class Db
         using var c = Open();
         c.Execute("PRAGMA journal_mode = WAL;");
         c.Execute(Schema);
+        // Idempotent migrations for CHANGE-001 (add columns if an older DB is being upgraded).
+        AddColumn(c, "pcs", "alias", "TEXT NULL");
+        AddColumn(c, "pcs", "fingerprint", "TEXT NULL");
+        AddColumn(c, "pcs", "work_pc", "INTEGER NOT NULL DEFAULT 0");
+        AddColumn(c, "pcs", "revoked", "INTEGER NOT NULL DEFAULT 0");
+    }
+
+    private static void AddColumn(SqliteConnection c, string table, string column, string decl)
+    {
+        var exists = c.Query<string>($"SELECT name FROM pragma_table_info('{table}')").Any(n => n.Equals(column, StringComparison.OrdinalIgnoreCase));
+        if (!exists) c.Execute($"ALTER TABLE {table} ADD COLUMN {column} {decl}");
     }
 
     private const string Schema = """
@@ -102,6 +113,26 @@ public sealed class Db
         CREATE TABLE IF NOT EXISTS packages (
             id TEXT PRIMARY KEY, name TEXT NOT NULL, file_name TEXT NOT NULL, sha256 TEXT NOT NULL, size INTEGER NOT NULL,
             silent_args TEXT NOT NULL, uploaded_at INTEGER NOT NULL, uploaded_by TEXT NOT NULL);
+
+        -- CHANGE-001: every device the server has seen, by hardware fingerprint.
+        CREATE TABLE IF NOT EXISTS devices (
+            fingerprint TEXT PRIMARY KEY,
+            pc_id TEXT NULL,
+            status TEXT NOT NULL,            -- accepted | blocked | pending | revoked
+            verdict TEXT NULL,
+            reason TEXT NULL,
+            permanent INTEGER NOT NULL DEFAULT 0,
+            name TEXT NULL, model TEXT NULL, ip TEXT NULL,
+            report TEXT NULL,
+            first_seen INTEGER NOT NULL, last_seen INTEGER NOT NULL,
+            console_login_at INTEGER NULL,   -- first successful Console login from this fingerprint
+            agent_enrolled_at INTEGER NULL);
+
+        -- CHANGE-001 2.3/2.4: Console-created period presets.
+        CREATE TABLE IF NOT EXISTS periods (
+            id TEXT PRIMARY KEY, name TEXT NOT NULL, preset TEXT NOT NULL, has_lock INTEGER NOT NULL,
+            start_at INTEGER NOT NULL, end_at INTEGER NOT NULL, started_by TEXT NOT NULL, created_at INTEGER NOT NULL, stopped INTEGER NOT NULL DEFAULT 0);
+        CREATE TABLE IF NOT EXISTS period_targets (period_id TEXT NOT NULL REFERENCES periods(id) ON DELETE CASCADE, pc_id TEXT NOT NULL, PRIMARY KEY (period_id, pc_id));
         """;
 }
 

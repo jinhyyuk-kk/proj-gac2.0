@@ -101,14 +101,5 @@ public sealed class DeviceGuard(IReadOnlySet<string>? knownReleaseHashes = null)
         new(v, Accepted: false, NeedsReview: false, PermanentlyBlocked: permanent, reason);
 
     /// <summary>Stable hardware fingerprint: wired MACs first, else manufacturer+model+computer name.</summary>
-    public static string Fingerprint(DeviceReport report)
-    {
-        var basis = report.WiredMacs.Length > 0
-            ? string.Join(",", report.WiredMacs.Select(m => Normalize(m)).Where(m => m.Length > 0).Order())
-            : $"{report.Manufacturer}|{report.Model}|{report.ComputerName}".ToUpperInvariant();
-        if (basis.Length == 0) basis = report.ComputerName.ToUpperInvariant();
-        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes("gac-device|" + basis)));
-    }
-
-    public static string Normalize(string mac) => new(mac.Where(Uri.IsHexDigit).Select(char.ToUpperInvariant).ToArray());
+    public static string Fingerprint(DeviceReport report) => HardwareId.FromReport(report);
 }

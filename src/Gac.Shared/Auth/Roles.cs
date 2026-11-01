@@ -16,6 +16,10 @@ public enum Permission
     ManagePackages,
     ManageAccounts,
     ManageServerSettings,
+    /// <summary>CHANGE-001 2.4: unlock a PC that is locked for a period. Default Owner/Admin/Operator.</summary>
+    UnlockPc,
+    /// <summary>CHANGE-001 1.2/1.4: approve/revoke/block devices, clear console-first. Default Owner/Admin.</summary>
+    ManageDevices,
 }
 
 /// <summary>The fixed role → permission matrix from CLAUDE.md section 5. Enforced on the server; the console only mirrors it.</summary>
@@ -25,11 +29,18 @@ public static class RolePermissions
     {
         [Role.Owner] = [.. Enum.GetValues<Permission>()],
         [Role.Admin] = [.. Enum.GetValues<Permission>().Where(p => p is not (Permission.ManageAccounts or Permission.ManageServerSettings))],
-        [Role.Operator] = [Permission.ViewPcs, Permission.ViewReports, Permission.RunModules],
+        [Role.Operator] = [Permission.ViewPcs, Permission.ViewReports, Permission.RunModules, Permission.UnlockPc],
         [Role.Viewer] = [Permission.ViewPcs, Permission.ViewReports],
     };
 
     public static bool Has(Role role, Permission permission) => Map[role].Contains(permission);
+
+    /// <summary>The default permission set for a role (starting point the Owner can edit, except Owner which is fixed).</summary>
+    public static IReadOnlySet<Permission> Default(Role role) => Map[role];
+
+    /// <summary>Permissions the Owner is allowed to toggle for non-Owner roles (account/server management stay Owner-only).</summary>
+    public static readonly IReadOnlyList<Permission> Editable =
+        [.. Enum.GetValues<Permission>().Where(p => p is not (Permission.ManageAccounts or Permission.ManageServerSettings))];
 
     /// <summary>Operators are limited to their assigned groups; everyone else sees all PCs.</summary>
     public static bool IsGroupScoped(Role role) => role == Role.Operator;

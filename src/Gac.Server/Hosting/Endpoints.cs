@@ -28,12 +28,19 @@ public static class Endpoints
             return Results.Ok(new EnrollHelloResponse(EnrollmentProof.Compute(pcs.EnrollCode, id.Thumbprint, nonce), Environment.MachineName, version));
         });
 
-        app.MapPost("/api/enroll", (EnrollRequest req, PcService pcs, ServerIdentity id, PolicyService policies, EnrollThrottle throttle, HttpContext ctx) =>
+        app.MapPost("/api/enroll", (EnrollRequest req, PcService pcs, ServerIdentity id, PolicyService policies, EnrollThrottle throttle, Devices.DeviceService devices, HttpContext ctx) =>
         {
             var ip = ctx.Connection.RemoteIpAddress?.ToString() ?? "?";
             if (!throttle.Allow(ip)) return Error("등록 시도가 너무 많습니다. 잠시 후 다시 시도하세요.", 429);
             if (!pcs.CheckCode(req.Code)) { throttle.Fail(ip); return Error("등록 코드가 올바르지 않습니다.", 403); }
-            var (agentId, key) = pcs.Enroll(req);
+            // Desktop-only + install-order are enforced here on the server from the raw probe values (CHANGE-001 1.2).
+            if (req.Device is null) return Error(Devices.DeviceGuard.LaptopMessage, 403); // fail closed: no probe data
+            var (decision, fp) = devices.Evaluate(req.Device, ip);
+            if (decision.NeedsReview)
+                return Results.Ok(new EnrollResponse("", "", "", policies.PollSeconds, EnrollStatus.PendingReview, "최고 관리자 승인을 기다리는 중입니다."));
+            if (!decision.Accepted) return Error(decision.Reason, 403);
+            var (agentId, key) = pcs.Enroll(req, fp);
+            devices.BindAgent(fp, agentId);
             return Results.Ok(new EnrollResponse(agentId, Convert.ToBase64String(key), id.PresetPublicKeyPem, policies.PollSeconds));
         });
 
@@ -42,13 +49,18 @@ public static class Endpoints
         app.UseWhen(c => c.Request.Path.StartsWithSegments("/api/agent"), b => b.Use(AgentAuthMiddleware));
         var agent = app.MapGroup("/api/agent");
 
-        agent.MapPost("/poll", (PollRequest req, HttpContext ctx, PcService pcs, CommandService commands, PolicyService policies) =>
+        agent.MapPost("/poll", (PollRequest req, HttpContext ctx, PcService pcs, CommandService commands, PolicyService policies, Devices.DeviceService devices, Periods.PeriodService periodsSvc) =>
         {
             var (agentId, key) = ((string, byte[]))ctx.Items[AgentKey]!;
+            var ip = ctx.Connection.RemoteIpAddress?.ToString();
+            // Re-check desktop-only / revocation on every heartbeat (CHANGE-001 1.2 — three choke points).
+            var revoke = devices.CheckHeartbeat(agentId, req.Device, ip);
+            if (revoke != null) return Results.Ok(new PollResponse([], null, null, policies.PollSeconds, Revoked: true, RevokedReason: revoke));
             pcs.Touch(agentId, req);
             var (policy, ver) = policies.ForPc(pcs.GetGroupId(agentId));
             var cmds = commands.Deliver(agentId, key);
-            return Results.Ok(new PollResponse(cmds, req.PolicyVersion == ver ? null : policy, ver, policies.PollSeconds));
+            var periods = periodsSvc.ActiveForPc(agentId, workPc: devices.IsWorkPc(agentId));
+            return Results.Ok(new PollResponse(cmds, req.PolicyVersion == ver ? null : policy, ver, policies.PollSeconds, Periods: periods));
         });
 
         agent.MapPost("/reports", (ReportUpload up, HttpContext ctx, CommandService commands) =>
@@ -72,16 +84,33 @@ public static class Endpoints
         });
 
         // ---------- console: setup & auth ----------
-        app.MapGet("/api/setup", (AccountService acc) => Results.Ok(new SetupStatus(acc.NeedsOwner(), Environment.MachineName, version)));
-        // First-run owner creation requires the enrollment code, which is only shown on the Admin PC (installer / admin-only file).
-        app.MapPost("/api/setup/owner", (CreateOwnerRequest req, AccountService acc, PcService pcs, EnrollThrottle throttle, HttpContext ctx) =>
+        app.MapGet("/api/setup", (AccountService acc) => Results.Ok(new SetupStatus(acc.SignUpOpen(), Environment.MachineName, version)));
+        // First-ever sign-up (= Owner) requires the single-use setup code shown at the end of server installation.
+        // The code is validated and consumed atomically inside CreateOwner, so two concurrent sign-ups cannot both win.
+        app.MapPost("/api/setup/owner", (CreateOwnerRequest req, AccountService acc, EnrollThrottle throttle, HttpContext ctx) =>
         {
             var ip = ctx.Connection.RemoteIpAddress?.ToString() ?? "?";
             if (!throttle.Allow(ip)) return Error("시도가 너무 많습니다. 잠시 후 다시 시도하세요.", 429);
-            if (!pcs.CheckCode(req.EnrollCode)) { throttle.Fail(ip); return Error("등록 코드가 올바르지 않습니다. 관리 PC에 표시된 등록 코드를 입력하세요.", 403); }
-            return Results.Ok(acc.CreateOwner(req));
+            try { return Results.Ok(acc.CreateOwner(req)); }
+            catch (GacException e) when (e.Status == 403) { throttle.Fail(ip); throw; }
         });
-        app.MapPost("/api/auth/login", (LoginRequest req, AccountService acc) => Results.Ok(acc.Login(req)));
+        app.MapPost("/api/auth/login", (LoginRequest req, AccountService acc, Devices.DeviceService devices) =>
+        {
+            var resp = acc.Login(req);
+            if (!string.IsNullOrWhiteSpace(req.MachineFingerprint)) devices.RecordConsoleLogin(req.MachineFingerprint!);
+            return Results.Ok(resp);
+        });
+
+        // A locked client PC sends the entered Console credentials here; unlock is authorized on the server (CHANGE-001 2.4).
+        app.MapPost("/api/agent/unlock", (UnlockRequest req, HttpContext ctx, AccountService acc, Periods.PeriodService periods, EnrollThrottle throttle) =>
+        {
+            var ip = ctx.Connection.RemoteIpAddress?.ToString() ?? "?";
+            if (!throttle.Allow(ip)) return Results.Ok(new UnlockResponse(false, "시도가 너무 많습니다. 잠시 후 다시 시도하세요."));
+            var r = acc.AuthorizeUnlock(req.UserName, req.Password);
+            if (!r.Ok) { throttle.Fail(ip); return Results.Ok(new UnlockResponse(false, r.Message)); }
+            acc.AuditUnlock(req.UserName, req.PeriodId, ip);
+            return Results.Ok(new UnlockResponse(true, "잠금을 해제했습니다."));
+        });
 
         var api = app.MapGroup("/api").AddEndpointFilter(SessionFilter);
         api.MapPost("/auth/logout", (HttpContext ctx, AccountService acc) => { acc.Logout(Token(ctx)!); return Results.Ok(); });
@@ -145,6 +174,28 @@ public static class Endpoints
             Need(ctx, Permission.ManageServerSettings) ?? Results.Ok(new EnrollmentInfo(pcs.EnrollCode, Environment.MachineName, o.Port, id.Thumbprint)));
         api.MapPost("/enrollment/regenerate", (HttpContext ctx, PcService pcs, ServerIdentity id, ServerOptions o) =>
             Need(ctx, Permission.ManageServerSettings) ?? Results.Ok(new EnrollmentInfo(pcs.RegenerateEnrollCode(S(ctx)), Environment.MachineName, o.Port, id.Thumbprint)));
+
+        // accounts: permission matrix + ownership transfer (Owner only)
+        api.MapGet("/accounts/matrix", (HttpContext ctx, AccountService acc) => Need(ctx, Permission.ManageAccounts) ?? Results.Ok(acc.GetMatrix()));
+        api.MapPut("/accounts/matrix", (PermissionMatrix req, HttpContext ctx, AccountService acc) => Need(ctx, Permission.ManageAccounts) ?? Do(() => acc.SaveMatrix(S(ctx), req)));
+        api.MapPost("/accounts/{id:int}/transfer-ownership", (int id, HttpContext ctx, AccountService acc) => Need(ctx, Permission.ManageAccounts) ?? Do(() => acc.TransferOwnership(S(ctx), id)));
+
+        // PC alias (CHANGE-001 section 3): stored on the server, never renames Windows.
+        api.MapPut("/pcs/{id}/alias", (string id, SetAliasRequest req, HttpContext ctx, PcService pcs) => Need(ctx, Permission.ManageGroups) ?? Do(() => pcs.SetAlias(S(ctx), id, req.Alias)));
+
+        // devices: blocked list, pending approvals, revoke, clear console-first, work-PC exemption (CHANGE-001 1.2/1.4/2.4)
+        api.MapGet("/devices/blocked", (HttpContext ctx, Devices.DeviceService d) => Need(ctx, Permission.ViewPcs) ?? Results.Ok(d.Blocked()));
+        api.MapGet("/devices/pending", (HttpContext ctx, Devices.DeviceService d) => Need(ctx, Permission.ManageDevices) ?? Results.Ok(d.Pending()));
+        api.MapPost("/devices/{fp}/approve", (string fp, HttpContext ctx, Devices.DeviceService d) => Need(ctx, Permission.ManageDevices) ?? Do(() => d.Approve(S(ctx), fp)));
+        api.MapPost("/devices/{fp}/clear-console-first", (string fp, HttpContext ctx, Devices.DeviceService d) => Need(ctx, Permission.ManageDevices) ?? Do(() => d.ClearConsoleFirst(S(ctx), fp)));
+        api.MapPost("/pcs/{id}/revoke", (string id, HttpContext ctx, Devices.DeviceService d) => Need(ctx, Permission.ManageDevices) ?? Do(() => d.Revoke(S(ctx), id)));
+        api.MapPost("/pcs/{id}/remove-work-exemption", (string id, HttpContext ctx, Devices.DeviceService d) => Need(ctx, Permission.ManageDevices) ?? Do(() => d.RemoveWorkPc(S(ctx), id)));
+
+        // period presets (CHANGE-001 2.3)
+        api.MapGet("/periods", (HttpContext ctx, Periods.PeriodService p) => Need(ctx, Permission.ViewReports) ?? Results.Ok(p.List()));
+        api.MapPost("/periods", (CreatePeriodRequest req, HttpContext ctx, Periods.PeriodService p, PcService pcs) =>
+            Need(ctx, Permission.ManagePresets) ?? Results.Ok(p.Create(S(ctx), req, groups => pcs.PcIdsInGroups(S(ctx), groups))));
+        api.MapPost("/periods/{id}/stop", (string id, HttpContext ctx, Periods.PeriodService p) => Need(ctx, Permission.ManagePresets) ?? Do(() => p.Stop(S(ctx), id)));
     }
 
     private static Session S(HttpContext ctx) => (Session)ctx.Items[SessionKey]!;

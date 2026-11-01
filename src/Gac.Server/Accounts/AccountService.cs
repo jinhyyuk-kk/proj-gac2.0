@@ -7,9 +7,11 @@ using Gac.Shared.Contracts;
 
 namespace Gac.Server.Accounts;
 
-public sealed record Session(int AccountId, string UserName, string DisplayName, Role Role, IReadOnlyList<int> GroupIds)
+public sealed record Session(int AccountId, string UserName, string DisplayName, Role Role, IReadOnlyList<int> GroupIds, IReadOnlySet<Permission>? Permissions = null)
 {
-    public bool Has(Permission p) => RolePermissions.Has(Role, p);
+    // Effective permissions resolved from the Owner-editable matrix at auth time; falls back to role defaults.
+    private IReadOnlySet<Permission> Effective => Permissions ?? RolePermissions.Default(Role);
+    public bool Has(Permission p) => Effective.Contains(p);
     public bool CanAccessGroup(int? groupId) => !RolePermissions.IsGroupScoped(Role) || (groupId.HasValue && GroupIds.Contains(groupId.Value));
 }
 
@@ -40,17 +42,97 @@ public sealed class AccountService(Db db, AuditLog audit, TimeProvider time, int
         return c.ExecuteScalar<long>("SELECT COUNT(*) FROM accounts") == 0;
     }
 
+    /// <summary>
+    /// First-ever sign-up becomes the Owner (CHANGE-001 section 4). Requires the single-use setup code and runs in one
+    /// transaction with the empty-table check, so two concurrent sign-ups cannot both succeed. The code is consumed.
+    /// </summary>
     public AccountInfo CreateOwner(CreateOwnerRequest req)
     {
         using var c = db.Open();
         using var tx = c.BeginTransaction();
         if (c.ExecuteScalar<long>("SELECT COUNT(*) FROM accounts", transaction: tx) != 0)
-            throw new GacException("이미 계정이 있습니다. 최고 관리자 계정은 처음 한 번만 만들 수 있습니다.", 409);
+            throw new GacException("이미 계정이 있습니다. 회원가입은 처음 한 번만 할 수 있습니다.", 409);
+        var setup = c.QuerySingleOrDefault<string>("SELECT value FROM settings WHERE key = 'setup_code'", transaction: tx);
+        if (!string.IsNullOrEmpty(setup))
+        {
+            if (!CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(NormalizeCode(req.EnrollCode)), Encoding.UTF8.GetBytes(NormalizeCode(setup))))
+                throw new GacException("설치 코드가 올바르지 않습니다. 서버 설치 마지막 화면에 표시된 설치 코드를 입력하세요.", 403);
+        }
         var id = Insert(c, tx, new SaveAccountRequest(req.UserName, req.DisplayName, Role.Owner, false, [], req.Password));
+        c.Execute("DELETE FROM settings WHERE key = 'setup_code'", transaction: tx); // single-use: destroyed after first sign-up
         tx.Commit();
         audit.Write(req.UserName, "account.create_owner", req.UserName);
         return Get(id)!;
     }
+
+    public bool SignUpOpen() => NeedsOwner();
+
+    private static string NormalizeCode(string? s) => new((s ?? "").Where(char.IsLetterOrDigit).Select(char.ToUpperInvariant).ToArray());
+
+    /// <summary>The setup code shown on the Admin PC until the first sign-up consumes it (null once used).</summary>
+    public string? GetSetupCode()
+    {
+        using var c = db.Open();
+        return c.QuerySingleOrDefault<string>("SELECT value FROM settings WHERE key = 'setup_code'");
+    }
+
+    /// <summary>Generates the single-use setup code if absent (called at install / first run while no account exists).</summary>
+    public string EnsureSetupCode()
+    {
+        using var c = db.Open();
+        var existing = c.QuerySingleOrDefault<string>("SELECT value FROM settings WHERE key = 'setup_code'");
+        if (existing != null) return existing;
+        if (c.ExecuteScalar<long>("SELECT COUNT(*) FROM accounts") != 0) return "(이미 계정이 있어 설치 코드가 필요 없습니다)";
+        var code = Gac.Shared.Security.EnrollmentProof.NewCode();
+        c.Execute("INSERT INTO settings(key, value) VALUES('setup_code', @v) ON CONFLICT(key) DO NOTHING", new { v = code });
+        return code;
+    }
+
+    /// <summary>Transfer ownership to another account; the old Owner becomes Admin. Always exactly one Owner.</summary>
+    public void TransferOwnership(Session actor, int toAccountId)
+    {
+        if (actor.Role != Role.Owner) throw new GacException("최고 관리자만 소유권을 넘길 수 있습니다.", 403);
+        if (toAccountId == actor.AccountId) throw new GacException("자기 자신에게 소유권을 넘길 수 없습니다.");
+        using var c = db.Open();
+        using var tx = c.BeginTransaction();
+        var target = c.QuerySingleOrDefault<Row>("SELECT * FROM accounts WHERE id = @id", new { id = toAccountId }, tx) ?? throw new GacException("대상 계정을 찾을 수 없습니다.", 404);
+        if (target.disabled != 0) throw new GacException("사용 중지된 계정에는 소유권을 넘길 수 없습니다.");
+        c.Execute("UPDATE accounts SET role = @r WHERE id = @id", new { r = Role.Admin.ToString(), id = actor.AccountId }, tx);
+        c.Execute("UPDATE accounts SET role = @r WHERE id = @id", new { r = Role.Owner.ToString(), id = toAccountId }, tx);
+        tx.Commit();
+        audit.Write(actor.UserName, "account.transfer_ownership", target.user_name);
+    }
+
+    public sealed record UnlockResult(bool Ok, string Message);
+
+    /// <summary>Checks credentials for unlocking a locked PC (CHANGE-001 2.4). Requires the UnlockPc permission. Same lockout rule.</summary>
+    public UnlockResult AuthorizeUnlock(string userName, string password)
+    {
+        var now = time.GetUtcNow();
+        using var c = db.Open();
+        var row = c.QuerySingleOrDefault<Row>("SELECT * FROM accounts WHERE user_name = @u", new { u = userName?.Trim() ?? "" });
+        if (row == null)
+        {
+            PasswordHasher.Verify(password ?? "", Convert.ToBase64String(new byte[32]), Convert.ToBase64String(new byte[16]), iterations);
+            return new UnlockResult(false, "아이디 또는 비밀번호가 올바르지 않습니다.");
+        }
+        if (row.locked_until is { } lu && lu > Time.Ms(now)) return new UnlockResult(false, "로그인 시도가 너무 많아 계정이 잠겼습니다. 잠시 후 다시 시도하세요.");
+        if (row.disabled != 0) return new UnlockResult(false, "사용이 중지된 계정입니다.");
+        if (!PasswordHasher.Verify(password ?? "", row.password_hash, row.password_salt, (int)row.iterations))
+        {
+            var failed = row.failed_count + 1;
+            long? lockUntil = failed >= MaxFailedLogins ? Time.Ms(now + LockDuration) : null;
+            c.Execute("UPDATE accounts SET failed_count = @f, locked_until = @l WHERE id = @id", new { f = lockUntil.HasValue ? 0 : failed, l = lockUntil, id = row.id });
+            return new UnlockResult(false, lockUntil.HasValue ? "시도가 너무 많아 계정이 5분간 잠겼습니다." : "아이디 또는 비밀번호가 올바르지 않습니다.");
+        }
+        var role = Enum.Parse<Role>(row.role);
+        if (!GetMatrix().Effective(role).Contains(Permission.UnlockPc)) return new UnlockResult(false, "이 계정은 PC 잠금을 해제할 권한이 없습니다.");
+        c.Execute("UPDATE accounts SET failed_count = 0, locked_until = NULL WHERE id = @id", new { id = row.id });
+        return new UnlockResult(true, "확인되었습니다.");
+    }
+
+    public void AuditUnlock(string userName, string periodId, string? ip) =>
+        audit.Write(userName.Trim(), "pc.unlock", periodId, ip);
 
     public LoginResponse Login(LoginRequest req)
     {
@@ -116,7 +198,25 @@ public sealed class AccountService(Db db, AuditLog audit, TimeProvider time, int
         var acc = Get((int)s.account_id);
         if (acc == null || acc.Disabled) return null;
         c.Execute("UPDATE sessions SET last_seen = @n WHERE token_hash = @hash", new { n = Time.Ms(now), hash });
-        return new Session(acc.Id, acc.UserName, acc.DisplayName, acc.Role, acc.GroupIds);
+        // Effective permissions come from the current matrix, so Owner edits take effect on the next request.
+        return new Session(acc.Id, acc.UserName, acc.DisplayName, acc.Role, acc.GroupIds, GetMatrix().Effective(acc.Role));
+    }
+
+    public PermissionMatrix GetMatrix()
+    {
+        using var c = db.Open();
+        var json = c.QuerySingleOrDefault<string>("SELECT value FROM settings WHERE key = 'permission_matrix'");
+        if (json == null) return PermissionMatrix.Default();
+        try { return Gac.Shared.GacJson.Deserialize<PermissionMatrix>(json) ?? PermissionMatrix.Default(); }
+        catch { return PermissionMatrix.Default(); }
+    }
+
+    public void SaveMatrix(Session actor, PermissionMatrix matrix)
+    {
+        using var c = db.Open();
+        c.Execute("INSERT INTO settings(key, value) VALUES('permission_matrix', @v) ON CONFLICT(key) DO UPDATE SET value = @v",
+            new { v = Gac.Shared.GacJson.Serialize(matrix) });
+        audit.Write(actor.UserName, "accounts.permission_matrix", detail: Gac.Shared.GacJson.Serialize(matrix.Roles));
     }
 
     public IReadOnlyList<AccountInfo> List()

@@ -34,7 +34,21 @@ public sealed class EndToEndTests : IAsyncLifetime
         await _app.StartAsync();
         _port = new Uri(_app.Urls.First()).Port;
         _code = _app.Services.GetRequiredService<PcService>().EnrollCode;
+        _setupCode = _app.Services.GetRequiredService<Gac.Server.Accounts.AccountService>().EnsureSetupCode();
     }
+
+    private string _setupCode = "";
+
+    private static DeviceReport DesktopReport(string mac = "AABBCCDDEEFF") => new()
+    {
+        Probes = new HardwareProbes
+        {
+            PcSystemType = 1, ChassisTypesWmi = [3], ChassisTypesSmbios = [3],
+            LidPresent = false, SystemBatteriesPresent = false, BatteryInstancePresent = false,
+        },
+        Markers = new InstallMarkers { AgentFirstInstall = DateTimeOffset.UtcNow },
+        Manufacturer = "Dell", Model = "OptiPlex", WiredMacs = [mac], ComputerName = "TEST-PC-01", WiredLinkActive = true,
+    };
 
     public async Task DisposeAsync()
     {
@@ -49,7 +63,7 @@ public sealed class EndToEndTests : IAsyncLifetime
         var http = new HttpClient(CertPinning.CreatePinnedHandler(thumb)) { BaseAddress = new Uri($"https://127.0.0.1:{_port}") };
         var setup = await http.GetFromJsonAsync<SetupStatus>("/api/setup", GacJson.Options);
         if (setup!.NeedsOwner)
-            (await http.PostAsJsonAsync("/api/setup/owner", new CreateOwnerRequest("owner", "교장", "Passw0rd!x", _code), GacJson.Options)).EnsureSuccessStatusCode();
+            (await http.PostAsJsonAsync("/api/setup/owner", new CreateOwnerRequest("owner", "교장", "Passw0rd!x", _setupCode), GacJson.Options)).EnsureSuccessStatusCode();
         var login = await http.PostAsJsonAsync("/api/auth/login", new LoginRequest(user, password), GacJson.Options);
         login.EnsureSuccessStatusCode();
         var token = (await login.Content.ReadFromJsonAsync<LoginResponse>(GacJson.Options))!.Token;
@@ -59,13 +73,13 @@ public sealed class EndToEndTests : IAsyncLifetime
 
     private async Task<(AgentCore Core, PollWorker Worker, ServerClient Client)> EnrollAgentAsync()
     {
-        var req = new EnrollRequest(_code, "TEST-PC-01", "Windows", "AABBCCDDEEFF", "2.0.0");
+        var req = new EnrollRequest(_code, "TEST-PC-01", "Windows", "AABBCCDDEEFF", "2.0.0", Device: DesktopReport());
         var (resp, thumb) = await Enrollment.EnrollAsync("127.0.0.1", _port, _code, req, default);
         var store = new AgentStore(Path.Combine(_dir, "agent"));
         store.SaveIdentity(new AgentIdentity("127.0.0.1", _port, thumb, resp.AgentId, resp.AgentKeyBase64, resp.PresetPublicKeyPem));
         var runner = new ProcessRunner();
         var core = new AgentCore(store, new TrayPipeServer(NullLogger<TrayPipeServer>.Instance), runner, TimeProvider.System,
-            NullLogger<AgentCore>.Instance, c => AgentCli.CreateModules(c, runner));
+            NullLogger<AgentCore>.Instance, c => AgentCli.CreateModules(c, runner)) { DeviceReportOverride = () => DesktopReport() };
         var worker = new PollWorker(core, TimeProvider.System, NullLogger<PollWorker>.Instance);
         return (core, worker, core.Client!);
     }

@@ -4,7 +4,7 @@ namespace Gac.Shared.Contracts;
 
 public sealed record SetupStatus(bool NeedsOwner, string ServerName, string Version);
 public sealed record CreateOwnerRequest(string UserName, string DisplayName, string Password, string EnrollCode);
-public sealed record LoginRequest(string UserName, string Password);
+public sealed record LoginRequest(string UserName, string Password, string? MachineFingerprint = null);
 public sealed record LoginResponse(string Token, AccountInfo Account, DateTimeOffset ExpiresAt);
 
 public sealed record AccountInfo(int Id, string UserName, string DisplayName, Role Role, bool Disabled, IReadOnlyList<int> GroupIds,
@@ -16,12 +16,16 @@ public sealed record ResetPasswordRequest(string NewPassword);
 public sealed record PcGroup(int Id, string Name, int PcCount);
 public sealed record SaveGroupRequest(string Name);
 
+/// <param name="Name">Alias if set, otherwise the Windows computer name (what to show large).</param>
+/// <param name="WindowsName">The real Windows computer name (shown small; never changed by GAC).</param>
 public sealed record PcSummary(
     string Id, string Name, int? GroupId, string? GroupName, bool Online, DateTimeOffset? LastSeen,
     string? IpAddress, string? OsVersion, string? LoggedOnUser, string? AgentVersion,
-    double? MinFreePercent, int? PendingUpdates, int? RecentErrors, bool RebootRequired);
+    double? MinFreePercent, int? PendingUpdates, int? RecentErrors, bool RebootRequired,
+    string WindowsName = "", bool WorkPc = false, bool Revoked = false, string? Alias = null);
 
 public sealed record MovePcRequest(IReadOnlyList<string> PcIds, int? GroupId);
+public sealed record SetAliasRequest(string? Alias);
 
 public sealed record SendCommandRequest(string Module, string Action, string PayloadJson, IReadOnlyList<string> PcIds);
 public sealed record SendCommandResponse(Guid BatchId, int Count);

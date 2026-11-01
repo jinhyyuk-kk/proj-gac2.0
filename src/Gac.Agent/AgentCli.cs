@@ -107,11 +107,18 @@ public static class AgentCli
             var mac = NetworkInterface.GetAllNetworkInterfaces()
                 .Where(n => n.OperationalStatus == OperationalStatus.Up && n.NetworkInterfaceType is NetworkInterfaceType.Ethernet or NetworkInterfaceType.Wireless80211)
                 .Select(n => n.GetPhysicalAddress().ToString()).FirstOrDefault(m => m.Length > 0);
+            Hardware.DeviceReportCollector.WriteAgentInstallMarker();
             var old = store.LoadIdentity();
             var req = new EnrollRequest(code, Environment.MachineName, Environment.OSVersion.VersionString, mac,
                 typeof(AgentCli).Assembly.GetName().Version?.ToString(3) ?? "2.0.0",
-                old?.AgentId, old == null ? null : Gac.Shared.Security.EnrollmentProof.ReenrollProof(old.Key, old.AgentId, Environment.MachineName));
+                old?.AgentId, old == null ? null : Gac.Shared.Security.EnrollmentProof.ReenrollProof(old.Key, old.AgentId, Environment.MachineName),
+                Hardware.DeviceReportCollector.Collect());
             var (resp, thumb) = await Enrollment.EnrollAsync(host, port, code, req, CancellationToken.None);
+            if (resp.Status == EnrollStatus.PendingReview)
+            {
+                Console.Error.WriteLine("등록 대기: " + (resp.Message ?? "최고 관리자 승인을 기다립니다."));
+                return 3;
+            }
             store.SaveIdentity(new AgentIdentity(host, port, thumb, resp.AgentId, resp.AgentKeyBase64, resp.PresetPublicKeyPem));
             Console.WriteLine($"등록 완료: {Environment.MachineName} → {host}:{port}");
             return 0;
