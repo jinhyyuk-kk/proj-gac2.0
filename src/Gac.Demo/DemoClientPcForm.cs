@@ -56,7 +56,7 @@ public sealed class DemoClientPcForm : DemoViewForm
         side.Controls.Add(SideButton("수업 모드 프리셋 편집", (_, _) => OpenPresetEditor()));
         side.Controls.Add(SideButton("네트워크 자가 진단", (_, _) => OpenNetDiag()));
         side.Controls.Add(SideButton("자동 종료 경고 창", (_, _) => OpenShutdownWarning()));
-        side.Controls.Add(SideButton("기간 잠금 실행 (점심시간 컴퓨터실 잠금)", (_, _) => OpenLock()));
+        side.Controls.Add(SideButton("기간 잠금 실행 (PC 잠금 화면)", (_, _) => OpenLock()));
         _exemptToggle.CheckedChanged += (_, _) => OnExemptToggled();
         side.Controls.Add(_exemptToggle);
         side.Controls.Add(new Label { Height = 10, Width = 1 });

@@ -22,7 +22,7 @@ public sealed class ServerAdminView : UserControl
     // 상태
     private readonly Label _service = Ui.Label("", Ui.Title);
     private readonly Label _summary = Ui.Label("");
-    private readonly Panel _firewallPanel = new() { Dock = DockStyle.Top, Height = 230, BackColor = Color.FromArgb(255, 244, 229), Padding = new Padding(14), Visible = false };
+    private readonly Panel _firewallPanel = new() { Dock = DockStyle.Top, Height = 175, BackColor = Color.FromArgb(255, 244, 229), Padding = new Padding(14), Visible = false };
     private readonly TextBox _fwRange = new() { Width = 180 };
     private readonly NumericUpDown _fwPort = new() { Minimum = 1, Maximum = 65535, Value = 8443, Width = 90 };
     private readonly Label _fwResult = Ui.Label("");

@@ -30,10 +30,12 @@ public sealed class CalendarView : UserControl
         var add = Ui.Button("잠금 해제일 추가…", async (_, _) => await EditAsync(null), 140);
         add.Enabled = canEdit;
         bar.Controls.AddRange([
-            Ui.Button("◀", (_, _) => Move(-1), 40), _month, Ui.Button("▶", (_, _) => Move(1), 40), Ui.Button("오늘", (_, _) => { _grid.Month = FirstOfMonth(DateTime.Today); Render(); }, 60),
+            Ui.Button("◀", (_, _) => ShiftMonth(-1), 40), _month, Ui.Button("▶", (_, _) => ShiftMonth(1), 40), Ui.Button("오늘", (_, _) => { _grid.Month = FirstOfMonth(DateTime.Today); Render(); }, 60),
             add,
-            Ui.Label("■ 잠금 해제일: 그날은 어떤 기간이든 PC 잠금(lock_pc)을 하지 않습니다.   ▬ 기간 프리셋 (빨강 = 잠금 포함)", color: Ui.Muted),
         ]);
+        var legend = Ui.Label("■ 초록 = 잠금 해제일: 그날은 어떤 기간이든 PC 잠금(lock_pc)을 하지 않습니다.   ▬ 막대 = 기간 프리셋 (빨강 = 잠금 포함, 회색 = 끝남/중지). 막대를 누르면 자세히 볼 수 있습니다.", color: Ui.Muted);
+        legend.Dock = DockStyle.Top;
+        legend.Padding = new Padding(8, 0, 0, 4);
 
         var right = new Panel { Dock = DockStyle.Right, Width = 440, Padding = new Padding(6) };
         var rightBar = new FlowLayoutPanel { Dock = DockStyle.Bottom, AutoSize = true, WrapContents = true };
@@ -56,6 +58,7 @@ public sealed class CalendarView : UserControl
         Controls.Add(_grid);
         Controls.Add(new Splitter { Dock = DockStyle.Right, Width = 4 });
         Controls.Add(right);
+        Controls.Add(legend);
         Controls.Add(bar);
     }
 
@@ -64,7 +67,7 @@ public sealed class CalendarView : UserControl
 
     private static DateOnly FirstOfMonth(DateTime d) => new(d.Year, d.Month, 1);
 
-    private void Move(int months) { _grid.Month = _grid.Month.AddMonths(months); Render(); }
+    private void ShiftMonth(int months) { _grid.Month = _grid.Month.AddMonths(months); Render(); }
 
     private ExemptionDay? Selected() => _list.SelectedItems.Count == 0 ? null : (ExemptionDay)_list.SelectedItems[0].Tag!;
 

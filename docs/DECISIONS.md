@@ -43,5 +43,12 @@ One line each: decision — reason.
 - Missed scheduled shutdowns are skipped (1-minute tolerance) and never caught up at boot.
 
 ## CHANGE-002
-- Icon sources found in ./icon (repo root): GAC_ADMIN_SETUP.exe �� gac-admin.ico (9 frames, first RT_GROUP_ICON); gaclogo.png (only image, transparent PNG) �� gac.ico ? ./icon is git-ignored.
-- IconTool extract test injects a known icon group into a copy of the test host with UpdateResource ? a self-contained multi-size sample exe without committing binaries.
+- Icon sources found in ./icon (repo root): GAC_ADMIN_SETUP.exe → gac-admin.ico (9 frames, first RT_GROUP_ICON); gaclogo.png (only image, transparent PNG) → gac.ico — ./icon is git-ignored.
+- IconTool extract test injects a known icon group into a copy of the test host with UpdateResource — a self-contained multi-size sample exe without committing binaries.
+- Demo first (owner order 2026-11-01): CHANGE-002 is built and tried in GAC-Demo.exe before the real server/agent/installer work.
+- Exemption "Nth weekday": N = 1–4 plus 5 = "마지막" (last) — covers "last Friday" without a separate rule type.
+- Exemption expansion and lock suppression use Asia/Seoul via "Korea Standard Time" (fallback fixed UTC+9) — the day boundary must not depend on the PC's time zone setting.
+- Trusted clock after a reboot with the server unreachable: the wall clock is accepted only within [last server time − 10 min, last server time + 1 day]; otherwise the last server time is used — the monotonic counter restarts at boot, so this is the conservative choice (locks stay in force).
+- GAC 서버 관리 UI lives in a UI-only library Gac.ServerAdmin.UI behind IServerAdminBackend — the demo drives the real window without referencing Gac.Server.
+- Console screens: 캘린더 and 알림 are main-window tabs; 서버 관리 is a dialog under 관리 — tabs for things checked daily, a dialog for settings.
+- Server-shutdown schedule editor and overload editor live in Gac.Tray.UI — shared by the Console and the server-management app.
