@@ -70,6 +70,16 @@ public sealed class PeriodService(Db db, AuditLog audit, ServerIdentity identity
                 r.stopped == 0 && Time.At(r.end_at) > now && Time.At(r.start_at) <= now, r.has_lock == 1)).ToList();
     }
 
+    /// <summary>True when the period is running now and targets this PC (used to authorize an unlock request).</summary>
+    public bool IsActiveForPc(string periodId, string pcId)
+    {
+        using var c = db.Open();
+        return c.ExecuteScalar<long>("""
+            SELECT COUNT(*) FROM periods p JOIN period_targets t ON t.period_id = p.id
+            WHERE p.id = @periodId AND t.pc_id = @pcId AND p.stopped = 0 AND p.start_at <= @now AND p.end_at > @now
+            """, new { periodId, pcId, now = Time.Ms(time.GetUtcNow()) }) > 0;
+    }
+
     /// <summary>Signed period presets currently active for <paramref name="pcId"/>. On a work PC, lock_pc is stripped first.</summary>
     public IReadOnlyList<PeriodPreset> ActiveForPc(string pcId, bool workPc)
     {

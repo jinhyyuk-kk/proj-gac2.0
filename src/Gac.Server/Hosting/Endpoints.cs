@@ -104,12 +104,21 @@ public static class Endpoints
         });
 
         // A locked client PC sends the entered Console credentials here; unlock is authorized on the server (CHANGE-001 2.4).
-        app.MapPost("/api/agent/unlock", (UnlockRequest req, HttpContext ctx, AccountService acc, Periods.PeriodService periods, EnrollThrottle throttle) =>
+        // The request arrives over the agent channel, so the PC is the authenticated agent (ctx AgentKey).
+        app.MapPost("/api/agent/unlock", (UnlockRequest req, HttpContext ctx, AccountService acc, Periods.PeriodService periods, PcService pcs, EnrollThrottle throttle) =>
         {
             var ip = ctx.Connection.RemoteIpAddress?.ToString() ?? "?";
             if (!throttle.Allow(ip)) return Results.Ok(new UnlockResponse(false, "시도가 너무 많습니다. 잠시 후 다시 시도하세요."));
+            var agentId = ctx.Items[AgentKey] is ValueTuple<string, byte[]> t ? t.Item1 : null;
+            if (agentId == null) return Results.Unauthorized();
+            // The period must be real, running and targeting this PC — a client cannot unlock with an arbitrary id.
+            if (!periods.IsActiveForPc(req.PeriodId, agentId)) return Results.Ok(new UnlockResponse(false, "이 PC에 적용 중인 기간이 아닙니다."));
             var r = acc.AuthorizeUnlock(req.UserName, req.Password);
             if (!r.Ok) { throttle.Fail(ip); return Results.Ok(new UnlockResponse(false, r.Message)); }
+            // Operators may only unlock PCs in their assigned groups (same scope rule as command dispatch).
+            var session = acc.SessionFor(req.UserName);
+            if (session == null || !session.CanAccessGroup(pcs.GetGroupId(agentId)))
+                return Results.Ok(new UnlockResponse(false, "담당 그룹이 아닌 PC는 잠금 해제할 수 없습니다."));
             acc.AuditUnlock(req.UserName, req.PeriodId, ip);
             return Results.Ok(new UnlockResponse(true, "잠금을 해제했습니다."));
         });

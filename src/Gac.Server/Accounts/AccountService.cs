@@ -226,6 +226,20 @@ public sealed class AccountService(Db db, AuditLog audit, TimeProvider time, int
         return ids.Select(i => Get((int)i)!).ToList();
     }
 
+    public AccountInfo? GetByUserName(string userName)
+    {
+        using var c = db.Open();
+        var id = c.QuerySingleOrDefault<long?>("SELECT id FROM accounts WHERE user_name = @u", new { u = userName?.Trim() ?? "" });
+        return id is null ? null : Get((int)id);
+    }
+
+    /// <summary>Builds a session (with effective permissions) for an account by name — used to scope an unlock request.</summary>
+    public Session? SessionFor(string userName)
+    {
+        var acc = GetByUserName(userName);
+        return acc is null || acc.Disabled ? null : new Session(acc.Id, acc.UserName, acc.DisplayName, acc.Role, acc.GroupIds, GetMatrix().Effective(acc.Role));
+    }
+
     public AccountInfo? Get(int id)
     {
         using var c = db.Open();
