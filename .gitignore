@@ -484,3 +484,6 @@ $RECYCLE.BIN/
 # GAC build output
 dist/
 artifacts/
+
+# Owner's icon source files (CHANGE-002 ¡×1.3): never committed
+/icon/

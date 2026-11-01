@@ -21,9 +21,13 @@
   <Folder Name="/tests/">
     <Project Path="tests/Gac.Agent.Tests/Gac.Agent.Tests.csproj" />
     <Project Path="tests/Gac.Console.Tests/Gac.Console.Tests.csproj" />
+    <Project Path="tests/Gac.Icons.Tests/Gac.Icons.Tests.csproj" />
     <Project Path="tests/Gac.Modules.Tests/Gac.Modules.Tests.csproj" />
     <Project Path="tests/Gac.Server.Tests/Gac.Server.Tests.csproj" />
     <Project Path="tests/Gac.Shared.Tests/Gac.Shared.Tests.csproj" />
     <Project Path="tests/Gac.Tamper.Tests/Gac.Tamper.Tests.csproj" />
+  </Folder>
+  <Folder Name="/tools/">
+    <Project Path="tools/Gac.IconTool/Gac.IconTool.csproj" />
   </Folder>
 </Solution>

@@ -41,3 +41,7 @@ One line each: decision â€” reason.
 - Permission matrix is Owner-editable and resolved into each session on every request; Owner-only powers (account/server management) can never be granted to another role.
 - `lock_pc` is stripped from a period preset by the server before delivery to a work PC; presets are signed with the server ECDSA key so the agent can trust a preset containing lock_pc.
 - Missed scheduled shutdowns are skipped (1-minute tolerance) and never caught up at boot.
+
+## CHANGE-002
+- Icon sources found in ./icon (repo root): GAC_ADMIN_SETUP.exe ¡æ gac-admin.ico (9 frames, first RT_GROUP_ICON); gaclogo.png (only image, transparent PNG) ¡æ gac.ico ? ./icon is git-ignored.
+- IconTool extract test injects a known icon group into a copy of the test host with UpdateResource ? a self-contained multi-size sample exe without committing binaries.
