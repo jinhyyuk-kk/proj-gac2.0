@@ -13,6 +13,7 @@
     <Project Path="src/Gac.Modules.Shutdown/Gac.Modules.Shutdown.csproj" />
     <Project Path="src/Gac.Modules.Update/Gac.Modules.Update.csproj" />
     <Project Path="src/Gac.Server/Gac.Server.csproj" />
+    <Project Path="src/Gac.ServerStatus/Gac.ServerStatus.csproj" />
     <Project Path="src/Gac.Shared/Gac.Shared.csproj" />
     <Project Path="src/Gac.Tray.UI/Gac.Tray.UI.csproj" />
     <Project Path="src/Gac.Tray/Gac.Tray.csproj" />

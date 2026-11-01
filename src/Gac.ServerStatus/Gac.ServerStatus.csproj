@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <AssemblyName>Gac.ServerStatus</AssemblyName>
+    <RootNamespace>Gac.ServerStatus</RootNamespace>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Gac.Server\Gac.Server.csproj" />
+    <ProjectReference Include="..\Gac.Tray.UI\Gac.Tray.UI.csproj" />
+  </ItemGroup>
+</Project>

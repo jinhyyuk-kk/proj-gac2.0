@@ -26,7 +26,8 @@ public sealed class ServerOptions
     public string LogsDir => Path.Combine(DataDir, "logs");
 }
 
-public sealed record ServerFileConfig(int Port);
+/// <param name="Ranges">CIDR ranges allowed through the firewall (CHANGE-001 §2). Only controls who may reach the port.</param>
+public sealed record ServerFileConfig(int Port, string[]? Ranges = null);
 
 /// <summary>Self-signed TLS certificate and ECDSA preset-signing key, created at install time.</summary>
 public sealed class ServerIdentity : IDisposable

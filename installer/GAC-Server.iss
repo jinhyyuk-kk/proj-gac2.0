@@ -38,14 +38,58 @@ Name: "korean"; MessagesFile: "lang\Korean.isl"
 Source: "{#PublishDir}\server\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 
+[Icons]
+Name: "{autoprograms}\GAC 서버 상태"; Filename: "{app}\Gac.ServerStatus.exe"
+
+[Run]
+Filename: "{app}\Gac.ServerStatus.exe"; Description: "GAC 서버 상태 창 열기"; Flags: nowait postinstall skipifsilent runascurrentuser
+
 [Code]
 var
   DeleteData: Boolean;
+  NetPage: TInputQueryWizardPage;
 
 function GetPort(Param: String): String;
 begin
-  Result := ExpandConstant('{param:PORT|8443}');
+  Result := Trim(NetPage.Values[1]);
+  if Result = '' then Result := ExpandConstant('{param:PORT|8443}');
 end;
+
+function GetRange(): String;
+begin
+  Result := Trim(NetPage.Values[0]);
+end;
+
+// Auto-detect the LAN network CIDR (CHANGE-001 §2) via PowerShell: the adapter that has a default gateway, its IPv4
+// address and prefix length, reduced to the network address (e.g. 10.20.0.0/22). Pre-fills the setup page.
+function DetectRange(): String;
+var
+  TempFile, S: AnsiString;
+  rc: Integer;
+  Ps: String;
+begin
+  Result := '';
+  Ps := '$c=Get-NetIPConfiguration|Where-Object{$_.IPv4DefaultGateway}|Select-Object -First 1;' +
+        'if($c){$a=$c.IPv4Address;$len=$a.PrefixLength;$b=[System.Net.IPAddress]::Parse($a.IPAddress).GetAddressBytes();' +
+        '[Array]::Reverse($b);$ip=[BitConverter]::ToUInt32($b,0);$m=[uint32]0;if($len-gt0){$m=[uint32]4294967295-shl(32-$len)};' +
+        '$n=$ip-band$m;$nb=[BitConverter]::GetBytes($n);[Array]::Reverse($nb);([System.Net.IPAddress]$nb).ToString()+''/''+$len}';
+  TempFile := ExpandConstant('{tmp}\gac_range.txt');
+  if Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+       '-NoProfile -NonInteractive -Command "(' + Ps + ') | Out-File -Encoding ASCII ''' + TempFile + '''"',
+       '', SW_HIDE, ewWaitUntilTerminated, rc) then
+    if LoadStringFromFile(TempFile, S) then Result := Trim(String(S));
+  DeleteFile(TempFile);
+end;
+
+procedure InitializeWizard();
+begin
+  NetPage := CreateInputQueryPage(wpSelectDir, '교내망과 포트', '감지된 교내망 대역과 포트를 확인하세요.',
+    '이 대역과 포트만 방화벽에서 열립니다. 학교 네트워크가 바뀌면 나중에 ''GAC 서버 상태''에서 다시 설정할 수 있습니다.');
+  NetPage.Add('교내망 대역 (CIDR, 예: 10.20.0.0/22):', False);
+  NetPage.Add('포트:', False);
+  NetPage.Values[1] := '8443';
+end;
+
 
 procedure StopServer();
 var
@@ -70,7 +114,8 @@ begin
   if CurStep = ssPostInstall then
   begin
     WizardForm.StatusLabel.Caption := 'GAC 서버를 설정하는 중... (인증서, 데이터베이스, 방화벽, 서비스)';
-    if not Exec(ExpandConstant('{app}\Gac.Server.exe'), 'install --port ' + GetPort(''), ExpandConstant('{app}'), SW_HIDE, ewWaitUntilTerminated, rc) or (rc <> 0) then
+    if not Exec(ExpandConstant('{app}\Gac.Server.exe'),
+         'install --port ' + GetPort('') + ' --range "' + GetRange() + '"', ExpandConstant('{app}'), SW_HIDE, ewWaitUntilTerminated, rc) or (rc <> 0) then
       SuppressibleMsgBox('GAC 서버 설정 중 문제가 발생했습니다 (코드 ' + IntToStr(rc) + '). 설치 로그를 확인하세요.', mbError, MB_OK, IDOK);
   end;
 end;
@@ -81,6 +126,8 @@ var
   Text: String;
   I: Integer;
 begin
+  if (CurPageID = NetPage.ID) and (Trim(NetPage.Values[0]) = '') then
+    NetPage.Values[0] := DetectRange();
   if CurPageID = wpFinished then
   begin
     Text := '';

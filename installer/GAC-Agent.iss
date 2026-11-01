@@ -124,20 +124,85 @@ begin
   Result := Trim(ExpandConstant('{param:CODE|}'));
 end;
 
+// Crude extractor for a "key":"value" or "key":number pair from the rollout gac-agent.json.
+function JsonValue(const Json, Key: String): String;
+var
+  P, Q: Integer;
+  Rest: String;
+begin
+  Result := '';
+  P := Pos('"' + Key + '"', Json);
+  if P = 0 then Exit;
+  Rest := Copy(Json, P + Length(Key) + 2, Length(Json));
+  P := Pos(':', Rest);
+  if P = 0 then Exit;
+  Rest := Trim(Copy(Rest, P + 1, Length(Rest)));
+  if (Length(Rest) > 0) and (Rest[1] = '"') then
+  begin
+    Rest := Copy(Rest, 2, Length(Rest));
+    Q := Pos('"', Rest);
+    if Q > 0 then Result := Copy(Rest, 1, Q - 1);
+  end
+  else
+  begin
+    Q := 1;
+    while (Q <= Length(Rest)) and (Rest[Q] >= '0') and (Rest[Q] <= '9') do Q := Q + 1;
+    Result := Copy(Rest, 1, Q - 1);
+  end;
+end;
+
+var
+  RolloutServer, RolloutCode: String;
+
+// Read a rollout package (gac-agent.json) placed next to the installer, so a classroom PC enrolls by a plain double-click.
+procedure LoadRollout();
+var
+  S: AnsiString;
+  Json, Addr, Port: String;
+begin
+  RolloutServer := '';
+  RolloutCode := '';
+  if LoadStringFromFile(ExpandConstant('{src}\gac-agent.json'), S) then
+  begin
+    Json := String(S);
+    Addr := JsonValue(Json, 'ServerAddress');
+    Port := JsonValue(Json, 'Port');
+    if Addr <> '' then
+    begin
+      RolloutServer := Addr;
+      if Port <> '' then RolloutServer := Addr + ':' + Port;
+    end;
+    RolloutCode := JsonValue(Json, 'EnrollCode');
+  end;
+end;
+
 procedure InitializeWizard();
 begin
+  LoadRollout();
   ServerPage := CreateInputQueryPage(wpSelectDir, 'GAC 서버에 등록', '이 PC를 학교 GAC 서버에 등록합니다.',
     '관리 PC(GAC 서버) 설치 마지막 화면에 나온 서버 주소와 등록 코드를 입력하세요.' + #13#10 +
-    '이미 등록된 PC를 업그레이드할 때는 비워 두어도 됩니다.');
+    '클라이언트 설치 파일(롤아웃 패키지)로 설치하면 자동으로 채워집니다. 업그레이드 시에는 비워 두어도 됩니다.');
   ServerPage.Add('서버 주소 (예: ADMIN-PC:8443):', False);
   ServerPage.Add('등록 코드 (예: K7QM-2XPA-9RTD):', False);
-  ServerPage.Values[0] := ParamServer();
-  ServerPage.Values[1] := ParamCode();
+  if ParamServer() <> '' then ServerPage.Values[0] := ParamServer() else ServerPage.Values[0] := RolloutServer;
+  if ParamCode() <> '' then ServerPage.Values[1] := ParamCode() else ServerPage.Values[1] := RolloutCode;
+end;
+
+function EffectiveServer(): String;
+begin
+  Result := ParamServer();
+  if Result = '' then Result := RolloutServer;
+end;
+
+function EffectiveCode(): String;
+begin
+  Result := ParamCode();
+  if Result = '' then Result := RolloutCode;
 end;
 
 function ShouldSkipPage(PageID: Integer): Boolean;
 begin
-  Result := (PageID = ServerPage.ID) and (ParamServer() <> '') and (ParamCode() <> '');
+  Result := (PageID = ServerPage.ID) and (EffectiveServer() <> '') and (EffectiveCode() <> '');
 end;
 
 function NextButtonClick(CurPageID: Integer): Boolean;

@@ -35,14 +35,17 @@ if (-not $SkipTests) {
 $common = @("-c", $Configuration, "-r", "win-x64", "--self-contained", "true", "--nologo", "-v", "q", "-p:DebugType=none", "-p:GenerateDocumentationFile=false")
 
 $apps = [ordered]@{
-    server  = "src\Gac.Server\Gac.Server.csproj"
-    agent   = "src\Gac.Agent\Gac.Agent.csproj"
-    tray    = "src\Gac.Tray\Gac.Tray.csproj"
-    console = "src\Gac.Console\Gac.Console.csproj"
+    server       = "src\Gac.Server\Gac.Server.csproj"
+    serverstatus = "src\Gac.ServerStatus\Gac.ServerStatus.csproj"
+    agent        = "src\Gac.Agent\Gac.Agent.csproj"
+    tray         = "src\Gac.Tray\Gac.Tray.csproj"
+    console      = "src\Gac.Console\Gac.Console.csproj"
 }
 foreach ($name in $apps.Keys) {
     Invoke-Step "publish $name" { dotnet publish (Join-Path $root $apps[$name]) @common -o (Join-Path $publish $name) }
 }
+# The server status app ships inside the server folder (installed by GAC-Server-Setup.exe).
+Copy-Item (Join-Path $publish "serverstatus\*") (Join-Path $publish "server") -Recurse -Force
 
 Invoke-Step "publish GAC-Demo.exe (single file)" {
     dotnet publish (Join-Path $root "src\Gac.Demo\Gac.Demo.csproj") @common `
