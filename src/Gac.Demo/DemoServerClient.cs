@@ -31,6 +31,7 @@ public sealed class DemoServerClient : IGacServerClient
     private readonly List<PendingDevice> _pending = [];
     private readonly List<PeriodPresetInfo> _periods = [];
     private string _code = "DEMO-2026-GAC0";
+    private bool _ownerSignedUp;
     private long _auditId;
     private int _nextAccountId = 5;
     private int _nextGroupId = 6;
@@ -55,6 +56,8 @@ public sealed class DemoServerClient : IGacServerClient
     internal void AddPc(DemoPc pc) => _pcs.Add(pc);
     internal void AddAccount(AccountInfo a) => _accounts.Add(a);
     internal void AddPackage(DeployPackage p) => _packages.Add(p);
+    internal void AddBlocked(BlockedDevice d) => _blocked.Add(d);
+    internal void AddPending(PendingDevice d) => _pending.Add(d);
     internal void SeedReport(DemoPc pc, string module, string action, ModuleSimResult r, DateTimeOffset at)
     {
         var row = new ReportRow(Guid.NewGuid(), pc.Id, pc.Name, module, action, r.Success, r.Summary, r.DataJson, at, ReportTrigger.Schedule);
@@ -71,9 +74,37 @@ public sealed class DemoServerClient : IGacServerClient
         _audit.Add(new AuditEntry(++_auditId, DateTimeOffset.Now, Owner.UserName, action, target, detail));
 
     // ---- auth ----
-    public Task<SetupStatus> GetSetupAsync() => Task.FromResult(new SetupStatus(false, ServerDisplayName, "2.0.0"));
-    public Task<AccountInfo> CreateOwnerAsync(CreateOwnerRequest request) => throw new GacClientException("체험 모드에서는 이미 최고 관리자로 로그인되어 있습니다.");
-    public Task<LoginResponse> LoginAsync(string userName, string password) => Task.FromResult(new LoginResponse("demo", Owner, DateTimeOffset.Now.AddHours(8)));
+    // CHANGE-001 §7: the demo console view starts at the sign-up screen. The first sign-up becomes the Owner and then
+    // the 회원가입 button disappears (NeedsOwner flips to false), exactly like the real first-run flow.
+    public bool OwnerSignedUp { get { lock (_lock) return _ownerSignedUp; } }
+    public Task<SetupStatus> GetSetupAsync() { lock (_lock) return Task.FromResult(new SetupStatus(!_ownerSignedUp, ServerDisplayName, "2.0.0")); }
+
+    public async Task<AccountInfo> CreateOwnerAsync(CreateOwnerRequest request)
+    {
+        await Delay(200);
+        lock (_lock)
+        {
+            if (_ownerSignedUp) throw new GacClientException("이미 최고 관리자 계정이 있습니다. 회원가입은 한 번만 할 수 있습니다.");
+            if (string.IsNullOrWhiteSpace(request.UserName) || request.UserName.Trim().Length < 3) throw new GacClientException("아이디는 3자 이상이어야 합니다.");
+            if (string.IsNullOrWhiteSpace(request.DisplayName)) throw new GacClientException("이름을 입력하세요.");
+            var pw = request.Password ?? "";
+            if (pw.Length < 8 || !pw.Any(char.IsLetter) || !pw.Any(char.IsDigit)) throw new GacClientException("비밀번호는 8자 이상이고 문자와 숫자가 모두 들어가야 합니다.");
+            if (string.IsNullOrWhiteSpace(request.EnrollCode)) throw new GacClientException("설치 코드를 입력하세요. (체험 모드에서는 서버 PC 화면에 표시된 코드를 쓰거나 아무 값이나 넣어도 됩니다.)");
+            _accounts[0] = _accounts[0] with { UserName = request.UserName.Trim(), DisplayName = request.DisplayName.Trim() };
+            _ownerSignedUp = true;
+            Audit("account.create_owner", request.UserName.Trim());
+            return _accounts[0];
+        }
+    }
+
+    public Task<LoginResponse> LoginAsync(string userName, string password)
+    {
+        lock (_lock)
+        {
+            if (!_ownerSignedUp) throw new GacClientException("먼저 회원가입으로 최고 관리자 계정을 만드세요.");
+            return Task.FromResult(new LoginResponse("demo", Owner, DateTimeOffset.Now.AddHours(8)));
+        }
+    }
     public Task LogoutAsync() => Task.CompletedTask;
     public async Task ChangePasswordAsync(ChangePasswordRequest request) { await Delay(200); Audit("account.change_password", Owner.UserName); }
 

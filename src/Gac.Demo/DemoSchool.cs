@@ -92,6 +92,16 @@ public static class DemoSchool
         s.SeedAudit(now.AddDays(-2), "admin1", "group.policy", "컴퓨터실", "자동 종료 17:00");
         s.SeedAudit(now.AddDays(-1), "lab", "command.clean.run", "컴퓨터실-01, 컴퓨터실-02, 컴퓨터실-03", "{\"dryRun\":true}");
         s.SeedAudit(now.AddHours(-2), "owner", "login.success", null, null);
+
+        // CHANGE-001 §7: sample blocked/pending devices so the 차단된 기기 screen has realistic rows.
+        s.AddBlocked(new BlockedDevice("B2F1A9C0D3E4F5A6B7C8D9E0F1A2B3C4D5E6F7A8B9C0D1E2F3A4B5C6D7E8F9A0", now.AddDays(-5), "10.10.9.240",
+            "노트북-교사용", "LG gram 16", "노트북에는 설치할 수 없습니다. (섀시 유형: 노트북)", false));
+        s.AddBlocked(new BlockedDevice("A1C2E3F4059687B8C9DAEBFC0D1E2F3A4B5C6D7E8F9A0B1C2D3E4F5A6B7C8D9E0", now.AddDays(-3), "10.10.9.241",
+            "SAMSUNG-NT", "삼성 갤럭시북", "노트북에는 설치할 수 없습니다. (배터리·덮개 감지됨)", false));
+        s.AddBlocked(new BlockedDevice("C3E4F5A60718293A4B5C6D7E8F90A1B2C3D4E5F60718293A4B5C6D7E8F90A1B2", now.AddDays(-2), "10.10.0.201",
+            "관리-노트북", "관리자 프로그램(콘솔)이 설치된 PC", "관리자 프로그램이 설치된 PC에는 클라이언트를 설치할 수 없습니다.", true));
+        s.AddPending(new PendingDevice("D4F5A60718293A4B5C6D7E8F90A1B2C3D4E5F60718293A4B5C6D7E8F90A1B2C3", now.AddHours(-6), "10.10.9.242",
+            "교무실-예비PC", "HP ProDesk 600 (UPS 연결)", "배터리가 감지되어 확인이 필요합니다. 데스크톱이 맞으면 승인하세요."));
     }
 
     public static PresetFile SharedPresets() => new()
