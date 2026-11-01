@@ -19,6 +19,8 @@ public sealed class ServerOptions
     public bool LoopbackOnly { get; init; }
     /// <summary>Lower PBKDF2 iterations for tests only. Production always uses 600,000.</summary>
     public int? PasswordIterationsOverride { get; init; }
+    /// <summary>Tests replace the Admin PC shutdown; loopback-only test servers never shut the machine down.</summary>
+    public Admin.IServerPowerAction? PowerAction { get; init; }
 
     public static string DefaultDataDir => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "GAC", "Server");
     public string DatabasePath => Path.Combine(DataDir, "gac.db");

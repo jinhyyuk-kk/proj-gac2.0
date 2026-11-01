@@ -143,6 +143,16 @@ public sealed class DeviceService(Db db, AuditLog audit, DeviceGuard guard, Time
         audit.Write(actor.UserName, "device.approve", r.name, fingerprint[..Math.Min(12, fingerprint.Length)]);
     }
 
+    /// <summary>[영구 차단] from overload blocking (CHANGE-002 §4.3): the PC joins the 차단된 기기 list permanently.</summary>
+    public void BlockPermanently(Session actor, string pcId, string reason)
+    {
+        using var c = db.Open();
+        var name = c.QuerySingleOrDefault<string?>("SELECT name FROM pcs WHERE id = @pcId", new { pcId });
+        c.Execute("UPDATE pcs SET revoked = 1 WHERE id = @pcId", new { pcId });
+        c.Execute("UPDATE devices SET status = 'blocked', reason = @reason, permanent = 1 WHERE pc_id = @pcId", new { pcId, reason });
+        audit.Write(actor.UserName, "overload.block_permanent", name ?? pcId, reason);
+    }
+
     public void Revoke(Session actor, string pcId)
     {
         using var c = db.Open();

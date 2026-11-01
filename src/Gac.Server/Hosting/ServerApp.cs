@@ -77,6 +77,12 @@ public static class ServerApp
         // Provision the single-use setup code at startup while no account exists, so sign-up can fail closed on its absence.
         new AccountService(db, new AuditLog(db, time), time).EnsureSetupCode();
         builder.Services.AddHostedService<MaintenanceService>();
+        // CHANGE-002 §4: overload blocking + alerts, Admin PC auto shutdown.
+        builder.Services.AddSingleton(sp => new Admin.OverloadGuard(db, sp.GetRequiredService<SettingsStore>(), sp.GetRequiredService<AuditLog>(), time));
+        builder.Services.AddSingleton(new Admin.AlertStore(db, time));
+        var power = options.PowerAction ?? (options.LoopbackOnly ? new NoPowerAction() : new Admin.WindowsServerPowerAction());
+        builder.Services.AddSingleton(sp => new Admin.ServerShutdownService(sp.GetRequiredService<SettingsStore>(), sp.GetRequiredService<AuditLog>(), db, time, power));
+        builder.Services.AddHostedService<Admin.ServerShutdownWorker>();
 
         var app = builder.Build();
         app.UseExceptionHandler(e => e.Run(async ctx =>
@@ -92,6 +98,26 @@ public static class ServerApp
             ctx.Response.StatusCode = status;
             await ctx.Response.WriteAsJsonAsync(new ApiError(message), GacJson.Options);
         }));
+        // CHANGE-002 §4.3: overload blocking runs first and does no database work for a blocked request (429, empty body).
+        app.Use(async (ctx, next) =>
+        {
+            var p = ctx.Request.Path;
+            var ip = ctx.Connection.RemoteIpAddress?.ToString() ?? "?";
+            var guard = ctx.RequestServices.GetRequiredService<Admin.OverloadGuard>();
+            var agentPath = p.StartsWithSegments("/api/agent") || p.StartsWithSegments("/api/enroll");
+            var loginPath = p.StartsWithSegments("/api/auth/login");
+            if (agentPath)
+            {
+                var agentId = ctx.Request.Headers[Gac.Shared.Security.RequestSigner.AgentHeader].ToString();
+                if (guard.IsBlocked(agentId.Length > 0 ? agentId : null, ip)) { ctx.Response.StatusCode = 429; return; }
+                if (p.Equals("/api/enroll") && HttpMethods.IsPost(ctx.Request.Method)) guard.CountEnrollment(ip);
+            }
+            else if (loginPath && guard.IsLoginBlocked(ip)) { ctx.Response.StatusCode = 429; return; }
+            try { await next(ctx); }
+            catch (Accounts.GacException e) when (loginPath && e.Status is 401 or 423) { guard.CountAuthFailure(ip); throw; } // failed console login
+            if (agentPath && ctx.Response.StatusCode is 401 or 410) guard.CountAuthFailure(ip); // bad signature or unknown agent id
+        });
+
         // CHANGE-002 §3.2: until the firewall step is done the server accepts no enrollment, no agent traffic and no sign-up.
         app.Use(async (ctx, next) =>
         {
@@ -109,6 +135,8 @@ public static class ServerApp
         return app;
     }
 }
+
+internal sealed class NoPowerAction : Admin.IServerPowerAction { public void Shutdown() { } }
 
 /// <summary>Background housekeeping: trims old sessions, reports and audit rows so the DB stays small.</summary>
 public sealed class MaintenanceService(Db db, TimeProvider time, ILogger<MaintenanceService> log) : BackgroundService

@@ -209,6 +209,31 @@ public static class Endpoints
             Need(ctx, Permission.ManagePresets) ?? Results.Ok(p.Create(S(ctx), req, groups => pcs.PcIdsInGroups(S(ctx), groups), pc => S(ctx).CanAccessGroup(pcs.GetGroupId(pc)))));
         api.MapPost("/periods/{id}/stop", (string id, HttpContext ctx, Periods.PeriodService p) => Need(ctx, Permission.ManagePresets) ?? Do(() => p.Stop(S(ctx), id)));
 
+        // alerts (CHANGE-002 §4.3/§4.5): queued overload alerts for the operator.
+        api.MapGet("/alerts", (HttpContext ctx, Admin.AlertStore a) => Need(ctx, Permission.ViewPcs) ?? Results.Ok(a.List()));
+        api.MapPost("/alerts/read", (MarkAlertsReadRequest req, HttpContext ctx, Admin.AlertStore a) => Need(ctx, Permission.ViewPcs) ?? Do(() => a.MarkRead(req.Ids ?? [])));
+
+        // server management (CHANGE-002 §4.5): Admin PC auto shutdown (서버 PC 종료 설정) and overload limits (서버 설정).
+        api.MapGet("/server/shutdown/status", (Admin.ServerShutdownService s) => Results.Ok(s.Status())); // every logged-in Console shows the notice
+        api.MapGet("/server/shutdown", (HttpContext ctx, Admin.ServerShutdownService s) => Staff(ctx, Permission.ManageServerShutdown) ?? Results.Ok(s.Schedule));
+        api.MapPut("/server/shutdown", (ServerShutdownSettings req, HttpContext ctx, Admin.ServerShutdownService s) =>
+            Need(ctx, Permission.ManageServerShutdown) ?? Do(() => s.SaveSchedule(S(ctx).UserName, req)));
+        api.MapPost("/server/shutdown/skip-today", (HttpContext ctx, Admin.ServerShutdownService s) => Need(ctx, Permission.ManageServerShutdown) ?? Do(() => s.SkipToday(S(ctx).UserName)));
+        api.MapPost("/server/shutdown/extend", (HttpContext ctx, Admin.ServerShutdownService s) => Need(ctx, Permission.ManageServerShutdown) ?? Do(() => s.Extend(S(ctx).UserName)));
+        api.MapGet("/server/overload", (HttpContext ctx, Admin.OverloadGuard g) => Staff(ctx, Permission.ManageServerSettings) ?? Results.Ok(g.Settings));
+        api.MapPut("/server/overload", (OverloadSettings req, HttpContext ctx, Admin.OverloadGuard g) =>
+            Need(ctx, Permission.ManageServerSettings) ?? Do(() => g.SaveSettings(S(ctx).UserName, req)));
+        api.MapGet("/server/overload/blocks", (HttpContext ctx, Admin.OverloadGuard g) => Staff(ctx, Permission.ManageServerSettings) ?? Results.Ok(g.Blocks()));
+        api.MapPost("/server/overload/blocks/{key}/unblock", (string key, HttpContext ctx, Admin.OverloadGuard g) =>
+            Need(ctx, Permission.ManageServerSettings) ?? Do(() => g.Unblock(S(ctx).UserName, key)));
+        api.MapPost("/server/overload/blocks/{key}/permanent", (string key, HttpContext ctx, Admin.OverloadGuard g, Devices.DeviceService d) =>
+            Need(ctx, Permission.ManageServerSettings) ?? Do(() => d.BlockPermanently(S(ctx), g.TakeForPermanentBlock(key), "과도한 요청으로 영구 차단되었습니다.")));
+
+        // Admin PC only (loopback): the GAC 서버 관리 tray icon runs without admin rights and shows the T−10 popup.
+        app.MapGet("/api/local/server-shutdown", (HttpContext ctx, Admin.ServerShutdownService s) => Loopback(ctx) ?? Results.Ok(s.Status()));
+        app.MapPost("/api/local/server-shutdown/skip-today", (HttpContext ctx, Admin.ServerShutdownService s) => Loopback(ctx) ?? Do(() => s.SkipToday(LocalActor())));
+        app.MapPost("/api/local/server-shutdown/extend", (HttpContext ctx, Admin.ServerShutdownService s) => Loopback(ctx) ?? Do(() => s.Extend(LocalActor())));
+
         // calendar: lock exemption days (CHANGE-002 §2). Everyone with Console access can view; changes need 캘린더 관리.
         api.MapGet("/calendar/exemptions", (Calendar.ExemptionService e) => Results.Ok(e.List()));
         api.MapPost("/calendar/exemptions", (SaveExemptionDayRequest req, HttpContext ctx, Calendar.ExemptionService e) =>
@@ -227,6 +252,15 @@ public static class Endpoints
         S(ctx).Has(p) ? null : Error("이 작업을 할 권한이 없습니다.", 403);
 
     private static IResult Do(Action a) { a(); return Results.Ok(); }
+
+    /// <summary>Viewing server management needs Owner/Admin, or the change permission itself.</summary>
+    private static IResult? Staff(HttpContext ctx, Permission change) =>
+        S(ctx).Role is Role.Owner or Role.Admin || S(ctx).Has(change) ? null : Error("이 작업을 할 권한이 없습니다.", 403);
+
+    private static IResult? Loopback(HttpContext ctx) =>
+        ctx.Connection.RemoteIpAddress is { } ip && System.Net.IPAddress.IsLoopback(ip) ? null : Results.StatusCode(404);
+
+    private static string LocalActor() => "관리 PC 사용자"; // the person at the Admin PC (the service itself runs as SYSTEM)
 
     public static IResult Error(string message, int status) => Results.Json(new ApiError(message), GacJson.Options, statusCode: status);
 
@@ -265,6 +299,8 @@ public static class Endpoints
         if (!RequestSigner.Verify(key, agentId, ts, sig, req.Method, req.Path + req.QueryString, ms.ToArray(), time.GetUtcNow()))
         { ctx.Response.StatusCode = 401; return; }
         ctx.Items[AgentKey] = (agentId, key);
+        // Counted only after the HMAC check, so a spoofed agent id can never get another PC blocked (CHANGE-002 §4.3).
+        ctx.RequestServices.GetRequiredService<Admin.OverloadGuard>().CountAgentRequest(agentId, ctx.Connection.RemoteIpAddress?.ToString() ?? "?");
         await next(ctx);
     }
 }
