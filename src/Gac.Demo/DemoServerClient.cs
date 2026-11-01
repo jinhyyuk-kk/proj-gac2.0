@@ -344,7 +344,9 @@ public sealed class DemoServerClient : IGacServerClient
     public async Task<IReadOnlyList<AuditEntry>> GetAuditAsync(int limit = 2000) { await Delay(100); lock (_lock) return _audit.OrderByDescending(a => a.Id).Take(limit).ToList(); }
     public async Task<ServerSettings> GetSettingsAsync() { await Delay(80); lock (_lock) return _settings; }
     public async Task SaveSettingsAsync(ServerSettings settings) { await Delay(150); lock (_lock) { _settings = settings; Audit("server.settings"); } }
-    public async Task<EnrollmentInfo> GetEnrollmentAsync() { await Delay(80); return new EnrollmentInfo(_code, "ADMIN-PC", 8443, "체험 모드"); }
+    public async Task<EnrollmentInfo> GetEnrollmentAsync() { await Delay(80); return EnrollmentNow(); }
+    /// <summary>Synchronous read for the demo server view (the UI thread must never block on an async method).</summary>
+    internal EnrollmentInfo EnrollmentNow() { lock (_lock) return new EnrollmentInfo(_code, "ADMIN-PC", 8443, "체험 모드"); }
 
     public async Task<EnrollmentInfo> RegenerateEnrollmentAsync()
     {

@@ -24,7 +24,7 @@ public sealed class DemoServerStatusForm : DemoViewForm
     public DemoServerStatusForm(DemoServerClient client)
     {
         _client = client;
-        _enroll = client.GetEnrollmentAsync().GetAwaiter().GetResult();
+        _enroll = client.EnrollmentNow();
         Ui.Apply(this, "GAC 서버 상태 (체험)", new Size(680, 600));
         StartPosition = FormStartPosition.CenterScreen;
 
