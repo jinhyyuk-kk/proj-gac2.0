@@ -65,6 +65,7 @@ public static class AgentCli
             sp.GetRequiredService<ILogger<AgentCore>>(), core => CreateModules(core, sp.GetRequiredService<IProcessRunner>())));
         if (WindowsServiceHelpers.IsWindowsService())
             builder.Services.AddSingleton<IHostLifetime, GacServiceLifetime>();
+        builder.Services.AddHostedService<Hardware.ServiceStartupGuard>(); // laptop check site #2 (runs first)
         builder.Services.AddHostedService<TrayPipeWorker>();
         builder.Services.AddHostedService<PollWorker>();
         builder.Services.AddHostedService<SchedulerWorker>();

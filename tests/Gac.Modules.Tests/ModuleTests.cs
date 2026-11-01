@@ -138,6 +138,28 @@ public class ShutdownCoordinatorTests
     }
 
     [Fact]
+    public async Task Missed_schedule_is_skipped_and_logged_not_caught_up_at_boot()
+    {
+        var (c, t, _, x, logs) = Make();
+        // Agent first ticks a few minutes AFTER the scheduled time (PC was off; just booted) → never shut down.
+        t.Now = Start.AddMinutes(10).Add(ShutdownCoordinator.MissedTolerance).AddSeconds(30); // 17:31:30
+        await c.TickAsync(Policy, default);
+        for (var i = 0; i < 5; i++) { t.Advance(TimeSpan.FromMinutes(1)); await c.TickAsync(Policy, default); }
+        Assert.Empty(x.Calls);
+        Assert.Contains(logs, l => l.Outcome == ShutdownOutcome.Skipped);
+    }
+
+    [Fact]
+    public async Task Agent_running_within_tolerance_still_fires()
+    {
+        var (c, t, _, x, _) = Make();
+        // Agent is running at the scheduled time (first tick 30s after 17:30, within the 1-minute tolerance).
+        t.Now = Start.AddMinutes(10).AddSeconds(30);
+        await c.TickAsync(Policy, default); // enters Warning with deadline 17:30 (already passed) → shuts down
+        Assert.Single(x.Calls);
+    }
+
+    [Fact]
     public async Task Cancel_stops_pending_shutdown()
     {
         var (c, t, _, x, logs) = Make();

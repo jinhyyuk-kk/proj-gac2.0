@@ -23,5 +23,6 @@
     <Project Path="tests/Gac.Modules.Tests/Gac.Modules.Tests.csproj" />
     <Project Path="tests/Gac.Server.Tests/Gac.Server.Tests.csproj" />
     <Project Path="tests/Gac.Shared.Tests/Gac.Shared.Tests.csproj" />
+    <Project Path="tests/Gac.Tamper.Tests/Gac.Tamper.Tests.csproj" />
   </Folder>
 </Solution>

@@ -22,4 +22,8 @@
     <InternalsVisibleTo Include="Gac.Agent.Tests" />
   </ItemGroup>
 
+  <ItemGroup>
+    <PackageReference Include="System.Management" Version="10.0.14" />
+  </ItemGroup>
+
 </Project>

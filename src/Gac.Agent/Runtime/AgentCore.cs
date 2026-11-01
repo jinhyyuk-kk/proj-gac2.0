@@ -35,6 +35,19 @@ public sealed class AgentCore : IPackageSource
     public string? RevokedReason { get; private set; }
     public void MarkRevoked(string reason) { Revoked = true; RevokedReason = reason; }
 
+    /// <summary>Writes/removes the marker the tray reads to trust a UPS battery on a server-accepted desktop.</summary>
+    public void SetDeviceApproved(bool approved)
+    {
+        try
+        {
+            Directory.CreateDirectory(Store.StateDir);
+            var p = Path.Combine(Store.StateDir, "device-approved.txt");
+            if (approved) { if (!File.Exists(p)) File.WriteAllText(p, DateTimeOffset.UtcNow.ToString("o")); }
+            else if (File.Exists(p)) File.Delete(p);
+        }
+        catch (IOException) { }
+    }
+
     /// <summary>Signed period presets currently active for this PC (CHANGE-001 2.3/2.4), refreshed on each poll.</summary>
     public IReadOnlyList<Gac.Shared.Contracts.PeriodPreset> Periods { get; private set; } = [];
     public void SetPeriods(IReadOnlyList<Gac.Shared.Contracts.PeriodPreset>? periods) => Periods = periods ?? [];

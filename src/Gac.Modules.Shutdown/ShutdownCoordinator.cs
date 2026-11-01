@@ -28,6 +28,8 @@ public sealed class ShutdownCoordinator(ITrayBridge tray, IShutdownExecutor exec
 {
     private readonly Lock _lock = new();
     private DateOnly? _handledDate;
+    /// <summary>How late the agent may observe the scheduled time and still fire (CHANGE-001 2.5). Beyond this, skip.</summary>
+    public static readonly TimeSpan MissedTolerance = TimeSpan.FromMinutes(1);
 
     public ShutdownPhase Phase { get; private set; } = ShutdownPhase.Idle;
     public DateTimeOffset? Deadline { get; private set; }
@@ -48,7 +50,7 @@ public sealed class ShutdownCoordinator(ITrayBridge tray, IShutdownExecutor exec
     public async Task TickAsync(ShutdownPolicy policy, CancellationToken ct)
     {
         var now = time.GetLocalNow();
-        bool doShutdown = false, doForce = false, warn = false;
+        bool doShutdown = false, doForce = false, warn = false, skipped = false;
         lock (_lock)
         {
             _policy = policy;
@@ -60,13 +62,19 @@ public sealed class ShutdownCoordinator(ITrayBridge tray, IShutdownExecutor exec
                     if (_handledDate == today) break;
                     var at = ScheduledToday(policy, now);
                     if (at == null) break;
-                    // Do not shut down a PC that was turned on long after the scheduled time (e.g. evening class).
-                    if (now > at.Value.AddMinutes(30)) { _handledDate = today; break; }
+                    // CHANGE-001 2.5: a missed run is skipped, never caught up. If the agent was not running at (or within a
+                    // short tolerance of) the scheduled time — e.g. the PC was off and boots later — do not shut it down.
+                    if (now > at.Value.Add(MissedTolerance))
+                    {
+                        _handledDate = today;
+                        skipped = true; // log once: PC was off / agent not running at the scheduled time
+                        break;
+                    }
                     if (now >= at.Value.AddMinutes(-policy.WarningMinutes))
                     {
                         _handledDate = today;
                         Phase = ShutdownPhase.Warning;
-                        Deadline = at.Value < now ? now.AddMinutes(policy.WarningMinutes) : at.Value;
+                        Deadline = at.Value;
                         ExtensionsUsed = 0;
                         _warned = false;
                     }
@@ -90,6 +98,7 @@ public sealed class ShutdownCoordinator(ITrayBridge tray, IShutdownExecutor exec
             }
         }
 
+        if (skipped) log(new ShutdownLog(ShutdownOutcome.Skipped, now, 0, "PC was off / agent not running at the scheduled time"));
         if (warn) tray.Broadcast(ServiceEvent.ShutdownWarning, new ShutdownWarningBody(Deadline!.Value, Math.Max(0, policy.MaxExtensions - ExtensionsUsed), policy.ExtensionMinutes));
         if (doShutdown)
         {

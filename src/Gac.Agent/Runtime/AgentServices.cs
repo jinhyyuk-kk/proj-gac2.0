@@ -72,8 +72,10 @@ public sealed class PollWorker(AgentCore core, TimeProvider time, ILogger<PollWo
         {
             core.MarkRevoked(resp.RevokedReason ?? "이 PC는 관리 대상에서 제외되었습니다.");
             core.SetPeriods([]);
+            core.SetDeviceApproved(false);
             return; // stop processing commands/periods
         }
+        core.SetDeviceApproved(true); // server accepted this device (lets the tray trust a UPS battery on a desktop)
         core.SetPeriods(resp.Periods);
         if (resp.Policy != null) core.ApplyPolicy(resp.Policy, resp.PolicyVersion);
 

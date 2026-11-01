@@ -47,12 +47,76 @@ Root: HKLM; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: 
 Filename: "{app}\Tray\Gac.Tray.exe"; Description: "선생님용 GAC 트레이 실행"; Flags: nowait postinstall skipifsilent runasoriginaluser
 
 [Code]
+const
+  LaptopMsg = '이 프로그램은 데스크톱 PC에만 설치할 수 있습니다. 노트북에는 설치할 수 없습니다.';
+  ConsoleFirstMsg = '관리자 프로그램이 설치된 PC에는 클라이언트를 설치할 수 없습니다.';
+  ExitLaptop = 101;
+  ExitConsoleFirst = 102;
+
 var
   ServerPage: TInputQueryWizardPage;
 
 function ParamServer(): String;
 begin
   Result := Trim(ExpandConstant('{param:SERVER|}'));
+end;
+
+// CHANGE-001 1.1 check site #1 — laptop probe in the installer (probe A = PCSystemType, probe D = battery), run via
+// PowerShell/CIM. Fails closed: if the query cannot be read, the device is treated as a laptop.
+function RunPs(const Script: String; var Output: String): Boolean;
+var
+  TempFile, S: AnsiString;
+  ResultCode: Integer;
+begin
+  Result := False;
+  Output := '';
+  TempFile := ExpandConstant('{tmp}\gac_hw.txt');
+  if Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+       '-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "' + Script + ' | Out-File -Encoding ASCII ''' + TempFile + '''"',
+       '', SW_HIDE, ewWaitUntilTerminated, ResultCode) and (ResultCode = 0) then
+  begin
+    if LoadStringFromFile(TempFile, S) then begin Output := Trim(String(S)); Result := True; end;
+    DeleteFile(TempFile);
+  end;
+end;
+
+function IsLaptop(): Boolean;
+var
+  Out1, Out2: String;
+begin
+  // Probe A: PCSystemType = 2 means Mobile.
+  if not RunPs('(Get-CimInstance Win32_ComputerSystem).PCSystemType', Out1) then begin Result := True; Exit; end;
+  if Trim(Out1) = '2' then begin Result := True; Exit; end;
+  // Probe D: any battery present (BatteryStatus) → laptop.
+  if not RunPs('@(Get-CimInstance Win32_Battery).Count', Out2) then begin Result := True; Exit; end;
+  Result := (Trim(Out2) <> '') and (Trim(Out2) <> '0');
+end;
+
+// CHANGE-001 1.4 — refuse if the Console was installed first (markers/tombstone) and no earlier agent registration.
+function ConsoleCameFirst(): Boolean;
+var
+  ConsoleExists, Tombstone, AgentExists: Boolean;
+begin
+  ConsoleExists := RegKeyExists(HKLM64, 'SOFTWARE\GAC\Console') or RegKeyExists(HKLM, 'SOFTWARE\GAC\Console');
+  Tombstone := RegValueExists(HKLM64, 'SOFTWARE\GAC\Console', 'EverInstalled') or RegValueExists(HKLM, 'SOFTWARE\GAC\Console', 'EverInstalled');
+  AgentExists := RegValueExists(HKLM64, 'SOFTWARE\GAC\Agent', 'InstallTime') or RegValueExists(HKLM, 'SOFTWARE\GAC\Agent', 'InstallTime');
+  Result := (ConsoleExists or Tombstone) and (not AgentExists);
+end;
+
+function InitializeSetup(): Boolean;
+begin
+  Result := True;
+  if ConsoleCameFirst() then
+  begin
+    if not WizardSilent() then MsgBox(ConsoleFirstMsg, mbCriticalError, MB_OK);
+    Result := False;
+    Exit;
+  end;
+  if IsLaptop() then
+  begin
+    if not WizardSilent() then MsgBox(LaptopMsg, mbCriticalError, MB_OK);
+    Result := False;
+  end;
 end;
 
 function ParamCode(): String;

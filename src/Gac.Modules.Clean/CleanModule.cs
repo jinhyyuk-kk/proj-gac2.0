@@ -14,6 +14,7 @@ public sealed class CleanModule(ICleanEnvironment env, TimeProvider time) : IAge
     public async Task<ModuleOutcome> ExecuteAsync(ModuleRequest request, CancellationToken ct)
     {
         if (request.Action != ModuleActions.CleanRun) return ModuleOutcome.Fail("알 수 없는 명령입니다.");
+        if (LaptopPreRunCheck.IsLaptopOrUnknown()) return ModuleOutcome.Fail(LaptopPreRunCheck.Message); // check site #5
         var req = string.IsNullOrWhiteSpace(request.PayloadJson) ? null : GacJson.Deserialize<CleanRequest>(request.PayloadJson);
         var dryRun = req?.DryRun ?? request.Policy.Clean.DryRun;
 

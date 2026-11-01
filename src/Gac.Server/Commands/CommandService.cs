@@ -22,7 +22,7 @@ public sealed class CommandService(Db db, AuditLog audit, TimeProvider time)
         public string payload = ""; public string status = ""; public long created_at; public long? finished_at; public string? summary; public string? data;
     }
 
-    public SendCommandResponse Create(Session actor, SendCommandRequest req, Func<string, int?> groupOf, Func<string, DeployPackage?> packageOf)
+    public SendCommandResponse Create(Session actor, SendCommandRequest req, Func<string, int?> groupOf, Func<string, DeployPackage?> packageOf, Func<string, bool>? isRevoked = null)
     {
         if (!ModuleActions.IsKnown(req.Module, req.Action)) throw new GacException("알 수 없는 모듈 명령입니다.");
         var needed = RolePermissions.RequiredFor(req.Module, req.Action);
@@ -47,6 +47,8 @@ public sealed class CommandService(Db db, AuditLog audit, TimeProvider time)
             var g = groupOf(pc);
             if (g == null && !PcExists(pc)) throw new GacException("PC를 찾을 수 없습니다.", 404);
             if (!actor.CanAccessGroup(g)) throw new GacException("담당 그룹이 아닌 PC에는 명령을 보낼 수 없습니다.", 403);
+            // Command dispatch is the third server choke point (CHANGE-001 1.2): never dispatch to a revoked device.
+            if (isRevoked?.Invoke(pc) == true) throw new GacException("차단된 PC에는 명령을 보낼 수 없습니다.", 403);
         }
 
         var batchId = Guid.NewGuid();

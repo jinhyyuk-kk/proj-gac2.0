@@ -49,3 +49,37 @@ Filename: "{app}\Gac.Console.exe"; Description: "GAC 2.0 콘솔 실행"; Flags: 
 ; Saved server address / pinned certificate thumbprint of the user who uninstalls.
 Type: files; Name: "{userappdata}\GAC\console.json"
 Type: dirifempty; Name: "{userappdata}\GAC"
+
+[Code]
+// CHANGE-001 1.4 — the Console leaves install-order markers. A machine that had the Console first can never become a
+// client. The InstallTime (unix ms) lets the server compare install order; a tombstone survives uninstall.
+function UnixNowMs(): String;
+var
+  TempFile, S: AnsiString;
+  rc: Integer;
+begin
+  Result := '';
+  TempFile := ExpandConstant('{tmp}\gac_now.txt');
+  if Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+       '-NoProfile -NonInteractive -Command "[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() | Out-File -Encoding ASCII ''' + TempFile + '''"',
+       '', SW_HIDE, ewWaitUntilTerminated, rc) and (rc = 0) and LoadStringFromFile(TempFile, S) then
+    Result := Trim(String(S));
+  DeleteFile(TempFile);
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if CurStep = ssPostInstall then
+  begin
+    RegWriteStringValue(HKLM64, 'SOFTWARE\GAC\Console', 'Machine', GetComputerNameString());
+    if not RegValueExists(HKLM64, 'SOFTWARE\GAC\Console', 'InstallTime') then
+      RegWriteStringValue(HKLM64, 'SOFTWARE\GAC\Console', 'InstallTime', UnixNowMs());
+  end;
+end;
+
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+begin
+  if CurUninstallStep = usPostUninstall then
+    // Keep a permanent tombstone: the order cannot be reset by uninstalling (only the Owner can clear it).
+    RegWriteStringValue(HKLM64, 'SOFTWARE\GAC\Console', 'EverInstalled', GetDateTimeString('yyyy-mm-dd', #0, #0));
+end;

@@ -13,6 +13,13 @@ internal static class Program
         Application.SetCompatibleTextRenderingDefault(false);
         Application.SetDefaultFont(Ui.Font);
 
+        // CHANGE-001 1.1, check site #4: the tray refuses to run on a laptop (own probes A + E).
+        if (TrayStartupGuard.IsLaptopOrUnknown())
+        {
+            Ui.Error(null, TrayStartupGuard.Message);
+            return;
+        }
+
         // Desktop shortcut: Gac.Tray.exe --run-preset <id> runs one preset with the teacher's rights and exits.
         var i = Array.IndexOf(args, "--run-preset");
         if (i >= 0 && i + 1 < args.Length)

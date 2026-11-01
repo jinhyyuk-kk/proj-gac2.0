@@ -142,7 +142,7 @@ public static class Endpoints
 
         // commands & reports
         api.MapPost("/commands", (SendCommandRequest req, HttpContext ctx, CommandService c, PcService pcs, PackageStore store) =>
-            Need(ctx, Permission.RunModules) ?? Results.Ok(c.Create(S(ctx), req, pcs.GetGroupId, store.Get)));
+            Need(ctx, Permission.RunModules) ?? Results.Ok(c.Create(S(ctx), req, pcs.GetGroupId, store.Get, pcs.IsRevoked)));
         api.MapGet("/commands", (HttpContext ctx, CommandService c, int? limit) => Need(ctx, Permission.ViewReports) ?? Results.Ok(c.Batches(S(ctx), Math.Clamp(limit ?? 100, 1, 1000))));
         api.MapGet("/commands/{batchId:guid}", (Guid batchId, HttpContext ctx, CommandService c, PcService pcs) =>
             Need(ctx, Permission.ViewReports) ?? Results.Ok(c.BatchCommands(S(ctx), batchId).Where(r => S(ctx).CanAccessGroup(pcs.GetGroupId(r.PcId))).ToList()));
