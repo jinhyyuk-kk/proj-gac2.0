@@ -64,10 +64,10 @@ public sealed class LoginForm : Form
     {
         _client = client;
         _createOwner = setup.NeedsOwner;
-        Ui.Apply(this, _createOwner ? "GAC 2.0 – 최고 관리자 계정 만들기" : "GAC 2.0 – 로그인", new Size(440, _createOwner ? 330 : 220), resizable: false);
+        Ui.Apply(this, _createOwner ? "GAC 2.0 – 회원가입 (최고 관리자 등록)" : "GAC 2.0 – 로그인", new Size(440, _createOwner ? 330 : 220), resizable: false);
         StartPosition = FormStartPosition.CenterScreen;
         var head = Ui.Label(_createOwner
-            ? "처음 실행입니다. 학교 PC 전체를 관리할 최고 관리자 계정을 만드세요.\n(비밀번호: 8자 이상, 문자와 숫자 포함)"
+            ? "처음 실행입니다. 회원가입으로 최고 관리자 계정을 만드세요. 서버 설치 화면에 표시된 ‘설치 코드’가 필요합니다.\n첫 회원가입만 최고 관리자가 되고, 이후 계정은 계정 관리에서 추가합니다. (비밀번호: 8자 이상, 문자와 숫자 포함)"
             : $"서버: {client.ServerDisplayName}");
         head.Dock = DockStyle.Top;
         head.Padding = new Padding(10, 10, 10, 0);
@@ -76,8 +76,8 @@ public sealed class LoginForm : Form
         Ui.AddRow(grid, "아이디", _user);
         if (_createOwner) Ui.AddRow(grid, "이름", _display);
         Ui.AddRow(grid, "비밀번호", _pw);
-        if (_createOwner) { Ui.AddRow(grid, "비밀번호 확인", _pw2); Ui.AddRow(grid, "등록 코드", _code); }
-        var ok = Ui.Button(_createOwner ? "계정 만들기" : "로그인", async (_, _) => await SubmitAsync(), 100);
+        if (_createOwner) { Ui.AddRow(grid, "비밀번호 확인", _pw2); Ui.AddRow(grid, "설치 코드", _code); }
+        var ok = Ui.Button(_createOwner ? "회원가입" : "로그인", async (_, _) => await SubmitAsync(), 100);
         var cancel = Ui.Button("끝내기", (_, _) => DialogResult = DialogResult.Cancel, 80);
         var bar = Ui.ButtonBar(cancel, ok);
         if (!client.IsDemo) bar.Controls.Add(Ui.Button("다른 서버…", (_, _) => { ChangeServerRequested = true; DialogResult = DialogResult.Retry; }, 90));

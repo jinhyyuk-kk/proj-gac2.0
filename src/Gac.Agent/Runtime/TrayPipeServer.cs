@@ -25,6 +25,49 @@ public sealed class TrayPipeServer(ILogger<TrayPipeServer> log) : ITrayBridge
 
     public bool AnyUserSession => !_connections.IsEmpty || Sessions.ActiveUser() != null;
     public int ConnectedTrays => _connections.Count;
+    /// <summary>Connections proven to be the installed Gac.Tray.exe (used by the watchdog; a look-alike process cannot count).</summary>
+    public int VerifiedTrays => _connections.Values.Count(c => c.Verified);
+
+    private static readonly Lazy<string?> ExpectedTrayPath = new(() =>
+    {
+        try { var p = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "Tray", "Gac.Tray.exe")); return File.Exists(p) ? p : null; }
+        catch { return null; }
+    });
+
+    private bool VerifyClient(System.IO.Pipes.NamedPipeServerStream pipe)
+    {
+        try
+        {
+            if (!GetNamedPipeClientProcessId(pipe.SafePipeHandle.DangerousGetHandle(), out var pid)) return false;
+            using var proc = System.Diagnostics.Process.GetProcessById((int)pid);
+            var path = ProcessImagePath(pid);
+            var expected = ExpectedTrayPath.Value;
+            return expected != null && path != null && string.Equals(path, expected, StringComparison.OrdinalIgnoreCase);
+        }
+        catch { return false; }
+    }
+
+    private static string? ProcessImagePath(uint pid)
+    {
+        var h = OpenProcess(0x1000 /* QUERY_LIMITED_INFORMATION */, false, pid);
+        if (h == IntPtr.Zero) return null;
+        try
+        {
+            var sb = new System.Text.StringBuilder(1024);
+            var size = sb.Capacity;
+            return QueryFullProcessImageName(h, 0, sb, ref size) ? sb.ToString() : null;
+        }
+        finally { CloseHandle(h); }
+    }
+
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool GetNamedPipeClientProcessId(IntPtr pipe, out uint clientProcessId);
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+    private static extern IntPtr OpenProcess(uint access, bool inherit, uint pid);
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true, CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+    private static extern bool QueryFullProcessImageName(IntPtr process, uint flags, System.Text.StringBuilder name, ref int size);
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool CloseHandle(IntPtr handle);
 
     public static PipeSecurity CreateSecurity()
     {
@@ -81,7 +124,7 @@ public sealed class TrayPipeServer(ILogger<TrayPipeServer> log) : ITrayBridge
                 NamedPipeServerStream? next = null;
                 try { next = Create(security, first: false); }
                 catch (Exception e) when (e is IOException or UnauthorizedAccessException) { log.LogWarning("Could not pre-create tray pipe instance: {Error}", e.Message); }
-                var conn = new TrayConnection(Guid.NewGuid(), listening);
+                var conn = new TrayConnection(Guid.NewGuid(), listening) { Verified = VerifyClient(listening) };
                 listening = next;
                 _connections[conn.Id] = conn;
                 _ = Task.Run(() => ServeAsync(conn, ct), ct);
@@ -186,6 +229,7 @@ public sealed class TrayPipeServer(ILogger<TrayPipeServer> log) : ITrayBridge
     {
         private readonly SemaphoreSlim _write = new(1, 1);
         public Guid Id { get; } = id;
+        public bool Verified { get; init; }
         public NamedPipeServerStream Pipe { get; } = pipe;
         public string? User { get; set; }
 

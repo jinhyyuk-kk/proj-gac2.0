@@ -143,6 +143,9 @@ public sealed class MainForm : Form
         admin.DropDownItems.Add(new ToolStripMenuItem("PC 그룹 관리…", null, async (_, _) => await ManageGroupsAsync()) { Enabled = Can(Permission.ManageGroups) });
         admin.DropDownItems.Add(new ToolStripMenuItem("그룹별 정책 (자동 종료·정리)…", null, (_, _) => OpenGroupPolicy()));
         admin.DropDownItems.Add(new ToolStripMenuItem("서버 설정…", null, (_, _) => { using var f = new ServerSettingsForm(_client); f.ShowDialog(this); }) { Enabled = Can(Permission.ManageServerSettings) });
+        admin.DropDownItems.Add(new ToolStripMenuItem("기기 관리 (차단·확인 필요)…", null, async (_, _) => { using var f = new DevicesForm(_client); f.ShowDialog(this); await RefreshAllAsync(true); }) { Enabled = Can(Permission.ViewPcs) });
+        admin.DropDownItems.Add(new ToolStripMenuItem("기간제 프리셋 (수업 모드 기간)…", null, (_, _) => { using var f = new PeriodsForm(_client, _pcs, _groups); f.ShowDialog(this); }) { Enabled = Can(Permission.ManagePresets) });
+        admin.DropDownItems.Add(new ToolStripMenuItem("클라이언트 설치 파일 만들기…", null, async (_, _) => await ExportRolloutAsync()) { Enabled = Can(Permission.ManageServerSettings) });
         admin.DropDownItems.Add(new ToolStripSeparator());
         admin.DropDownItems.Add(new ToolStripMenuItem("내 비밀번호 변경…", null, async (_, _) => await ChangeOwnPasswordAsync()));
 
@@ -169,9 +172,15 @@ public sealed class MainForm : Form
         move.Click += async (_, _) => await MovePcsAsync();
         var del = new ToolStripButton("PC 삭제") { Enabled = Can(Permission.ManageGroups) };
         del.Click += async (_, _) => await DeletePcsAsync();
+        var alias = new ToolStripButton("별명 변경") { Enabled = Can(Permission.ManageGroups) };
+        alias.Click += async (_, _) => await EditAliasAsync();
+        var revoke = new ToolStripButton("차단(철회)") { Enabled = Can(Permission.ManageDevices) };
+        revoke.Click += async (_, _) => await RevokePcAsync();
+        var work = new ToolStripButton("업무용 해제") { Enabled = Can(Permission.ManageDevices) };
+        work.Click += async (_, _) => await RemoveWorkAsync();
         var all = new ToolStripButton("전체 선택");
         all.Click += (_, _) => _grid.SelectAll();
-        bar.Items.AddRange([runBtn, new ToolStripSeparator(), all, move, del]);
+        bar.Items.AddRange([runBtn, new ToolStripSeparator(), all, move, del, alias, new ToolStripSeparator(), revoke, work]);
 
         _grid.Dock = DockStyle.Fill;
         _grid.ReadOnly = true;
@@ -345,12 +354,15 @@ public sealed class MainForm : Form
         _grid.Rows.Clear();
         foreach (var p in VisiblePcs())
         {
-            var i = _grid.Rows.Add(p.Online ? "● 켜짐" : "○ 꺼짐", p.Name, p.GroupName ?? "-", p.IpAddress ?? "-", p.LoggedOnUser ?? "-",
+            var name = p.Name + (p.WorkPc ? "  [업무용]" : "") + (p.Revoked ? "  [차단됨]" : "");
+            var i = _grid.Rows.Add(p.Online ? "● 켜짐" : "○ 꺼짐", name, p.GroupName ?? "-", p.IpAddress ?? "-", p.LoggedOnUser ?? "-",
                 p.MinFreePercent is { } f ? $"{f:0}%" : "-", p.PendingUpdates?.ToString() ?? "-", p.RecentErrors?.ToString() ?? "-",
                 p.RebootRequired ? "필요" : "", p.LastSeen?.ToLocalTime().ToString("MM-dd HH:mm") ?? "-", p.AgentVersion ?? "");
             var row = _grid.Rows[i];
             row.Tag = p;
             row.Cells["state"].Style.ForeColor = p.Online ? Ui.Ok : Ui.Muted;
+            if (p.Revoked) row.Cells["name"].Style.ForeColor = Ui.Bad;
+            else if (p.WorkPc) row.Cells["name"].Style.ForeColor = Ui.Accent;
             if (p.MinFreePercent is < 10) row.Cells["free"].Style.ForeColor = Ui.Bad;
             if (p.PendingUpdates is > 0) row.Cells["updates"].Style.ForeColor = Ui.Warn;
             if (p.RecentErrors is > 0) row.Cells["errors"].Style.ForeColor = Ui.Bad;
@@ -459,6 +471,63 @@ public sealed class MainForm : Form
         if (dlg.ShowDialog(this) != DialogResult.OK) return;
         _status.Text = $"PC {dlg.Result!.Count}대에 작업을 보냈습니다. 결과는 [작업 결과] 탭에서 확인하세요.";
         Tabs.SelectedIndex = 1;
+    }
+
+    private async Task EditAliasAsync()
+    {
+        var pcs = SelectedPcs();
+        if (pcs.Count != 1) { Ui.Error(this, "별명을 바꿀 PC 하나를 선택하세요."); return; }
+        var pc = pcs[0];
+        using var dlg = new Form();
+        Ui.Apply(dlg, "별명 변경", new Size(380, 150), resizable: false);
+        var t = new TextBox { Text = pc.Alias ?? "", Width = 300, Left = 20, Top = 36 };
+        dlg.Controls.Add(new Label { Text = $"실제 이름: {pc.WindowsName}", Left = 20, Top = 12, AutoSize = true, ForeColor = Ui.Muted });
+        dlg.Controls.Add(t);
+        dlg.Controls.Add(Ui.ButtonBar(Ui.Button("취소", (_, _) => dlg.DialogResult = DialogResult.Cancel, 70), Ui.Button("저장", (_, _) => dlg.DialogResult = DialogResult.OK, 70)));
+        if (dlg.ShowDialog(this) != DialogResult.OK) return;
+        try { await _client.SetAliasAsync(pc.Id, t.Text); await RefreshAllAsync(false); }
+        catch (GacClientException e) { Ui.Error(this, e.Message); }
+    }
+
+    private async Task RevokePcAsync()
+    {
+        var pcs = SelectedPcs();
+        if (pcs.Count == 0 || !Ui.Confirm(this, $"선택한 PC {pcs.Count}대를 차단할까요? 차단된 PC는 즉시 관리에서 제외되고 다시 등록하려면 관리자가 허용해야 합니다.")) return;
+        try { foreach (var p in pcs) await _client.RevokePcAsync(p.Id); await RefreshAllAsync(false); }
+        catch (GacClientException e) { Ui.Error(this, e.Message); }
+    }
+
+    private async Task RemoveWorkAsync()
+    {
+        var pcs = SelectedPcs().Where(p => p.WorkPc).ToList();
+        if (pcs.Count == 0) { Ui.Error(this, "업무용으로 표시된 PC를 선택하세요."); return; }
+        try { foreach (var p in pcs) await _client.RemoveWorkExemptionAsync(p.Id); await RefreshAllAsync(false); }
+        catch (GacClientException e) { Ui.Error(this, e.Message); }
+    }
+
+    private async Task ExportRolloutAsync()
+    {
+        if (!_options.AllowFileExport)
+        {
+            Ui.Info(this, "체험 모드에서는 파일을 만들지 않습니다.\n실제 제품에서는 서버 주소·포트·인증서 지문·등록 코드가 담긴 폴더를 만들어, 교실 PC에서 더블클릭만으로 등록되게 합니다.");
+            return;
+        }
+        EnrollmentInfo info;
+        try { info = await _client.GetEnrollmentAsync(); }
+        catch (GacClientException e) { Ui.Error(this, e.Message); return; }
+        using var fbd = new FolderBrowserDialog { Description = "클라이언트 설치 파일을 저장할 폴더 선택" };
+        if (fbd.ShowDialog(this) != DialogResult.OK) return;
+        try
+        {
+            var dir = Path.Combine(fbd.SelectedPath, "GAC-Agent-Rollout");
+            Directory.CreateDirectory(dir);
+            var cfg = new { ServerAddress = info.ServerAddress, Port = info.Port, Thumbprint = info.Thumbprint, EnrollCode = info.Code };
+            File.WriteAllText(Path.Combine(dir, "gac-agent.json"), GacJson.Serialize(cfg));
+            File.WriteAllText(Path.Combine(dir, "설치방법.txt"),
+                "이 폴더에 GAC-Agent-Setup.exe 를 함께 복사한 뒤 교실 PC에서 실행하면 자동으로 등록됩니다.\r\n조용히 설치: GAC-Agent-Setup.exe /VERYSILENT /SUPPRESSMSGBOXES\r\n");
+            Ui.Info(this, "만들었습니다: " + dir + "\n이 폴더에 GAC-Agent-Setup.exe 를 함께 넣어 배포하세요.");
+        }
+        catch (IOException e) { Ui.Error(this, "만들지 못했습니다: " + e.Message); }
     }
 
     private async Task MovePcsAsync()

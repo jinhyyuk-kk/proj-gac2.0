@@ -30,8 +30,9 @@ public sealed class TrayWatchdog(TrayPipeServer pipe, ILogger<TrayWatchdog> log)
     {
         var session = WTSGetActiveConsoleSessionId();
         if (session == 0xFFFFFFFF) return; // no active console session
-        // Trust a tray only if a real one is connected to our pipe (a process merely *named* Gac.Tray proves nothing).
-        if (pipe.ConnectedTrays > 0) return;
+        // Trust a tray only if a verified one (the installed Gac.Tray.exe) is connected to our pipe. A look-alike process,
+        // or one merely named Gac.Tray, does not count — so it cannot suppress the relaunch to evade a lock.
+        if (pipe.VerifiedTrays > 0) return;
 
         if (!WTSQueryUserToken(session, out var userToken)) return; // no interactive user logged on
         try

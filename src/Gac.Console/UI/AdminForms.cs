@@ -21,6 +21,8 @@ public sealed class AccountsForm : Form
         bar.Controls.AddRange([
             Ui.Button("계정 추가", async (_, _) => await EditAsync(null)), Ui.Button("수정", async (_, _) => await EditAsync(Selected)),
             Ui.Button("비밀번호 초기화", async (_, _) => await ResetAsync(), 130), Ui.Button("삭제", async (_, _) => await DeleteAsync()),
+            Ui.Button("역할별 권한 설정…", (_, _) => { using var f = new PermissionMatrixForm(_client); f.ShowDialog(this); }, 140),
+            Ui.Button("소유권 넘기기", async (_, _) => await TransferAsync(), 120),
         ]);
         Controls.Add(_list);
         Controls.Add(bar);
@@ -77,6 +79,15 @@ public sealed class AccountsForm : Form
     {
         if (Selected is not { } a || !Ui.Confirm(this, $"'{a.DisplayName}' ({a.UserName}) 계정을 삭제할까요?")) return;
         try { await _client.DeleteAccountAsync(a.Id); await ReloadAsync(); }
+        catch (GacClientException e) { Ui.Error(this, e.Message); }
+    }
+
+    private async Task TransferAsync()
+    {
+        if (Selected is not { } a) { Ui.Error(this, "소유권을 넘길 계정을 선택하세요."); return; }
+        if (a.Role == Role.Owner) { Ui.Error(this, "이미 최고 관리자입니다."); return; }
+        if (!Ui.Confirm(this, $"'{a.DisplayName}'에게 최고 관리자(소유권)를 넘길까요?\n현재 최고 관리자는 관리자로 바뀝니다. 이 작업은 되돌릴 수 없습니다.")) return;
+        try { await _client.TransferOwnershipAsync(a.Id); Ui.Info(this, "소유권을 넘겼습니다. 다시 로그인하면 바뀐 권한이 적용됩니다."); await ReloadAsync(); }
         catch (GacClientException e) { Ui.Error(this, e.Message); }
     }
 }
