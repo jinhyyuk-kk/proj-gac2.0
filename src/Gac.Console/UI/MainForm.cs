@@ -29,7 +29,15 @@ public sealed class MainForm : Form
     private readonly AboutEasterEgg _egg = new(TimeProvider.System);
     private readonly MenuStrip _menu = new() { Dock = DockStyle.Top };
     private readonly ToolStripMenuItem _aboutItem = new(AboutEasterEgg.DialogTitle) { Visible = false };
-    private readonly Label _logo = new() { Text = "GAC 2.0", AutoSize = true, Font = new Font("맑은 고딕", 16f, FontStyle.Bold), ForeColor = Ui.Accent, Margin = new Padding(10, 6, 4, 4), Cursor = Cursors.Default };
+    private readonly Label _logo = new() { Text = "GAC 2.0", AutoSize = true, Font = new Font("맑은 고딕", 16f, FontStyle.Bold), ForeColor = Ui.Accent, Margin = new Padding(2, 6, 4, 4), Cursor = Cursors.Default };
+    /// <summary>CHANGE-002 §1.4: the admin logo (gac-admin-256.png) at the top-left — the Easter egg counts clicks on it.</summary>
+    private readonly PictureBox _logoImage = new() { Image = ConsoleIcons.Logo, SizeMode = PictureBoxSizeMode.Zoom, Size = new Size(38, 38), Margin = new Padding(8, 4, 0, 4), Cursor = Cursors.Default };
+    private readonly NotifyIcon _notify = new() { Text = "GAC 2.0 콘솔" };
+    private readonly HashSet<string> _alertsSeen = [];
+    private bool _alertsPrimed, _shutdownNoticeShown;
+    private CalendarView? _calendar;
+    private AlertsView? _alerts;
+    private TabPage? _calendarPage, _alertsPage;
     private readonly TreeView _tree = new() { Dock = DockStyle.Fill, HideSelection = false, Font = Ui.Font, FullRowSelect = true, ShowLines = false };
     internal readonly TabControl Tabs = new() { Dock = DockStyle.Fill };
     private readonly DataGridView _grid = new();
@@ -63,6 +71,9 @@ public sealed class MainForm : Form
         _me = me;
         _options = options;
         Ui.Apply(this, "GAC 2.0 콘솔", new Size(1180, 720));
+        Icon = ConsoleIcons.Admin; // the Console always shows the admin icon, also inside the demo's 관리자 화면
+        ShowIcon = true;
+        _notify.Icon = ConsoleIcons.Admin;
         StartPosition = FormStartPosition.CenterScreen;
         WindowState = FormWindowState.Maximized;
         MainMenuStrip = _menu;
@@ -74,10 +85,11 @@ public sealed class MainForm : Form
         who.Padding = new Padding(0, 12, 12, 0);
         var sub = Ui.Label("학교 PC 관리", color: Ui.Muted);
         sub.Margin = new Padding(2, 16, 0, 0);
-        header.Controls.Add(Ui.Row(_logo, sub));
+        header.Controls.Add(Ui.Row(_logoImage, _logo, sub));
         header.Controls.Add(who);
         // Easter egg: the logo click only counts; it never navigates or refreshes (EASTER_EGG.md).
         _logo.Click += (_, _) => { if (_egg.RegisterClick()) _aboutItem.Visible = true; };
+        _logoImage.Click += (_, _) => { if (_egg.RegisterClick()) _aboutItem.Visible = true; };
 
         var left = new Panel { Dock = DockStyle.Left, Width = 210, Padding = new Padding(6) };
         left.Controls.Add(_tree);
@@ -91,6 +103,8 @@ public sealed class MainForm : Form
         BuildReportsTab();
         BuildPresetsTab();
         BuildPackagesTab();
+        BuildCalendarTab();
+        BuildAlertsTab();
         if (Can(Permission.ViewAudit)) BuildAuditTab();
         Tabs.SelectedIndexChanged += async (_, _) => await RefreshCurrentTabAsync();
 
@@ -113,7 +127,67 @@ public sealed class MainForm : Form
             _refresh.Start();
             if (_options.ShowTour) BeginInvoke(() => GuidedTour.Show(this));
         };
-        FormClosed += (_, _) => _refresh.Dispose();
+        FormClosed += (_, _) => { _refresh.Dispose(); _notify.Visible = false; _notify.Dispose(); };
+    }
+
+    internal CalendarView? Calendar => _calendar;
+    internal AlertsView? Alerts => _alerts;
+    internal PictureBox LogoImage => _logoImage;
+
+    // ---------- CHANGE-002: calendar, alerts, server notices ----------
+    private void BuildCalendarTab()
+    {
+        _calendarPage = new TabPage("캘린더") { Name = "calendar" };
+        _calendar = new CalendarView(_client, Can(Permission.ManageCalendar), Can(Permission.ManagePresets));
+        _calendarPage.Controls.Add(_calendar);
+        Tabs.TabPages.Add(_calendarPage);
+    }
+
+    private void BuildAlertsTab()
+    {
+        _alertsPage = new TabPage("알림") { Name = "alerts" };
+        _alerts = new AlertsView(_client);
+        _alerts.UnreadChanged += (_, _) => _alertsPage.Text = _alerts.Unread > 0 ? $"알림 ({_alerts.Unread})" : "알림";
+        _alertsPage.Controls.Add(_alerts);
+        Tabs.TabPages.Add(_alertsPage);
+    }
+
+    /// <summary>
+    /// Overload alerts become a Windows notification (CHANGE-002 §4.3). Alerts raised while no Console was open are
+    /// queued on the server and shown at the next login (the first check below).
+    /// </summary>
+    private async Task CheckAlertsAsync()
+    {
+        if (_alerts == null) return;
+        await _alerts.LoadAsync();
+        var fresh = _alerts.Alerts.Where(a => !a.Read && _alertsSeen.Add(a.Id)).ToList();
+        if (fresh.Count == 0) { _alertsPrimed = true; return; }
+        _notify.Visible = true;
+        if (!_alertsPrimed && fresh.Count > 1)
+            _notify.ShowBalloonTip(6000, "GAC 과부하 차단 알림", $"확인하지 않은 알림이 {fresh.Count}건 있습니다. [알림] 탭에서 확인하세요.", ToolTipIcon.Warning);
+        else
+        {
+            var a = fresh.OrderByDescending(x => x.StartedAt).First();
+            _notify.ShowBalloonTip(6000, "GAC 과부하 차단 알림",
+                $"{a.PcAlias ?? a.WindowsName ?? "알 수 없는 PC"} ({a.WindowsName ?? "-"}, {a.Ip})\n{OverloadText.Korean(a.Limit)} · {a.RequestCount}회\n{a.StartedAt.ToLocalTime():HH:mm}부터 {a.BlockedUntil.ToLocalTime():HH:mm}까지 차단",
+                ToolTipIcon.Warning);
+        }
+        _alertsPrimed = true;
+    }
+
+    /// <summary>"서버 PC가 10분 후 종료됩니다." notice (CHANGE-002 §4.2); buttons only for "서버 PC 종료 설정".</summary>
+    private async Task CheckServerShutdownAsync()
+    {
+        ServerShutdownStatus s;
+        try { s = await _client.GetServerShutdownStatusAsync(); } catch (GacClientException) { return; }
+        if (!s.Warning) { _shutdownNoticeShown = false; return; }
+        if (_shutdownNoticeShown) return;
+        _shutdownNoticeShown = true;
+        var f = new ServerShutdownNoticeForm(s.NextShutdown, Can(Permission.ManageServerShutdown), s.WaitingFor);
+        f.SkipTodayClicked += async (_, _) => { try { await _client.SkipServerShutdownTodayAsync(); _status.Text = "서버 PC를 오늘은 끄지 않습니다."; } catch (GacClientException e) { Ui.Error(this, e.Message); } };
+        f.ExtendClicked += async (_, _) => { try { await _client.ExtendServerShutdownAsync(); _status.Text = "서버 PC 종료를 30분 연장했습니다."; } catch (GacClientException e) { Ui.Error(this, e.Message); } };
+        f.FormClosed += (_, _) => f.Dispose();
+        f.Show(this);
     }
 
     internal bool Can(Permission p) => RolePermissions.Has(_me.Role, p);
@@ -146,6 +220,13 @@ public sealed class MainForm : Form
         admin.DropDownItems.Add(new ToolStripMenuItem("기기 관리 (차단·확인 필요)…", null, async (_, _) => { using var f = new DevicesForm(_client); f.ShowDialog(this); await RefreshAllAsync(true); }) { Enabled = Can(Permission.ViewPcs) });
         admin.DropDownItems.Add(new ToolStripMenuItem("기간제 프리셋 (수업 모드 기간)…", null, (_, _) => { using var f = new PeriodsForm(_client, _pcs, _groups); f.ShowDialog(this); }) { Enabled = Can(Permission.ManagePresets) });
         admin.DropDownItems.Add(new ToolStripMenuItem("클라이언트 설치 파일 만들기…", null, async (_, _) => await ExportRolloutAsync()) { Enabled = Can(Permission.ManageServerSettings) });
+        admin.DropDownItems.Add(new ToolStripMenuItem("캘린더 (잠금 해제일)…", null, (_, _) => { if (_calendarPage != null) Tabs.SelectedTab = _calendarPage; }));
+        admin.DropDownItems.Add(new ToolStripMenuItem("서버 관리 (서버 PC 자동 종료·과부하 차단)…", null, async (_, _) =>
+        {
+            using var f = new ServerManagementForm(_client, Can(Permission.ManageServerShutdown), Can(Permission.ManageServerSettings));
+            f.ShowDialog(this);
+            await RefreshAllAsync(true);
+        }) { Enabled = _me.Role is Role.Owner or Role.Admin || Can(Permission.ManageServerShutdown) });
         admin.DropDownItems.Add(new ToolStripSeparator());
         admin.DropDownItems.Add(new ToolStripMenuItem("내 비밀번호 변경…", null, async (_, _) => await ChangeOwnPasswordAsync()));
 
@@ -301,6 +382,8 @@ public sealed class MainForm : Form
             FillTree();
             FillGrid();
             await RefreshCurrentTabAsync();
+            await CheckAlertsAsync();
+            await CheckServerShutdownAsync();
             _status.Text = $"PC {_pcs.Count}대 · 켜짐 {_pcs.Count(p => p.Online)}대 · 마지막 새로 고침 {DateTime.Now:HH:mm:ss}";
         }
         catch (GacClientException e)
@@ -316,6 +399,8 @@ public sealed class MainForm : Form
     {
         try
         {
+            if (Tabs.SelectedTab == _calendarPage && _calendar != null) { await _calendar.LoadAsync(); return; }
+            if (Tabs.SelectedTab == _alertsPage && _alerts != null) { await _alerts.LoadAsync(); return; }
             switch (Tabs.SelectedTab?.Text)
             {
                 case "작업 결과": await LoadBatchesAsync(); break;

@@ -18,7 +18,7 @@ public sealed record PeriodPreset(
 
 public sealed record PeriodPresetInfo(
     string Id, string PeriodName, DateTimeOffset StartAt, DateTimeOffset EndAt, string StartedBy,
-    int TargetCount, bool Running, bool HasLock);
+    int TargetCount, bool Running, bool HasLock, IReadOnlyList<string>? TargetNames = null);
 
 public sealed record CreatePeriodRequest(
     string PeriodName, string PresetJson, DateTimeOffset StartAt, int Days, IReadOnlyList<string> PcIds, IReadOnlyList<int> GroupIds);

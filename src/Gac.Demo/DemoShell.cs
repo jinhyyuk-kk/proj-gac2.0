@@ -19,6 +19,7 @@ public sealed class DemoShell : Form
     public DemoShell(DemoServerClient client)
     {
         _client = client;
+        UseGacIcon();
         Ui.Apply(this, "GAC 2.0 체험판", new Size(640, 560), resizable: false);
         StartPosition = FormStartPosition.CenterScreen;
         MaximizeBox = false;
@@ -33,8 +34,8 @@ public sealed class DemoShell : Form
 
         var stack = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false, Padding = new Padding(40, 10, 40, 10) };
         stack.Controls.Add(Card("🖥  관리자 화면 (콘솔)", "회원가입 → 로그인 → PC 관리, 계정·권한, 기기 차단 목록, 모든 모듈을 직접 조작해 보세요.", DemoView.Console));
-        stack.Controls.Add(Card("🗄  서버 PC 화면", "서버 설치 과정(감지된 교내망·설치 코드)과 ‘GAC 서버 상태’ 창을 체험합니다.", DemoView.Server));
-        stack.Controls.Add(Card("🏫  클라이언트(교실 PC) 화면", "트레이 앱·수업 모드·네트워크 진단·자동 종료 경고·PC 잠금 화면, 그리고 에이전트 설치 거부 화면을 봅니다.", DemoView.Client));
+        stack.Controls.Add(Card("🗄  서버 PC 화면", "서버 설치 과정([다음] → 방화벽 열기 → 설치 완료·설치 코드)과 ‘GAC 서버 관리’ 창(상태·자동 종료·과부하 차단·로그)을 체험합니다.", DemoView.Server));
+        stack.Controls.Add(Card("🏫  클라이언트(교실 PC) 화면", "트레이 앱·수업 모드·네트워크 진단·자동 종료 경고·PC 잠금 화면(잠금 해제일 체험 포함), 그리고 에이전트 설치 거부 화면을 봅니다.", DemoView.Client));
 
         var foot = Ui.Label("체험판은 실제 PC를 전혀 건드리지 않으며, 창을 닫으면 모든 내용이 사라집니다.", color: Ui.Muted);
         foot.Dock = DockStyle.Bottom;
@@ -80,13 +81,24 @@ public sealed class DemoShell : Form
         }
     }
 
-    private DemoView? RunView(DemoView view) => view switch
+    /// <summary>CHANGE-002 §1.4: the picker, server PC view and client PC view use the GAC icon; the 관리자 화면 uses the admin icon.</summary>
+    internal static void UseGacIcon() => Ui.AppIcon = GacIcons.Gac;
+
+    private DemoView? RunView(DemoView view)
     {
-        DemoView.Console => RunConsole(),
-        DemoView.Server => RunDialog(new DemoServerStatusForm(_client)),
-        DemoView.Client => RunDialog(new DemoClientPcForm(_client)),
-        _ => null,
-    };
+        try
+        {
+            if (view == DemoView.Console) Gac.Console.ConsoleApp.UseConsoleIcon(); else UseGacIcon();
+            return view switch
+            {
+                DemoView.Console => RunConsole(),
+                DemoView.Server => RunDialog(new DemoServerStatusForm(_client)),
+                DemoView.Client => RunDialog(new DemoClientPcForm(_client)),
+                _ => null,
+            };
+        }
+        finally { UseGacIcon(); }
+    }
 
     private static DemoView? RunDialog(DemoViewForm form)
     {

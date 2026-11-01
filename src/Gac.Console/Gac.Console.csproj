@@ -9,7 +9,14 @@
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <ApplicationVisualStyles>true</ApplicationVisualStyles>
     <ApplicationDefaultFont>맑은 고딕, 9.75pt</ApplicationDefaultFont>
+    <!-- CHANGE-002 §1.4: the Console (관리자 exe) uses the admin icon extracted from GAC_ADMIN_SETUP.exe. -->
+    <ApplicationIcon>..\..\assets\icons\gac-admin.ico</ApplicationIcon>
   </PropertyGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="..\..\assets\icons\gac-admin.ico" LogicalName="Gac.Icons.gac-admin.ico" />
+    <EmbeddedResource Include="..\..\assets\icons\gac-admin-256.png" LogicalName="Gac.Icons.gac-admin-256.png" />
+  </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\Gac.Shared\Gac.Shared.csproj" />

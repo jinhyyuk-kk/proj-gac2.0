@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- UI-only library for "GAC 서버 관리" (CHANGE-002 §4). No real implementation: the server-management app supplies a
+       backend that talks to the local service/DB, the demo supplies an in-memory fake. Must never reference Gac.Server. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <RootNamespace>Gac.ServerAdmin.UI</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Gac.Shared\Gac.Shared.csproj" />
+    <ProjectReference Include="..\Gac.Tray.UI\Gac.Tray.UI.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Gac.Console.Tests" />
+  </ItemGroup>
+</Project>

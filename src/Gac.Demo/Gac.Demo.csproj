@@ -8,12 +8,15 @@
     <RootNamespace>Gac.Demo</RootNamespace>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <ApplicationVisualStyles>true</ApplicationVisualStyles>
+    <!-- CHANGE-002 §1.4: GAC-Demo.exe file icon = GAC icon (the 관리자 화면 inside uses the admin icon). -->
+    <ApplicationIcon>..\..\assets\icons\gac.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\Gac.Shared\Gac.Shared.csproj" />
     <ProjectReference Include="..\Gac.Tray.UI\Gac.Tray.UI.csproj" />
     <ProjectReference Include="..\Gac.Console\Gac.Console.csproj" />
+    <ProjectReference Include="..\Gac.ServerAdmin.UI\Gac.ServerAdmin.UI.csproj" />
   </ItemGroup>
 
   <ItemGroup>

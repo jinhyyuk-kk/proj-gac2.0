@@ -11,7 +11,7 @@ namespace Gac.Demo;
 /// processes, no sockets. Every module "runs" through <see cref="DemoSimulator"/> after a short fake delay.
 /// Everything is discarded when the demo closes.
 /// </summary>
-public sealed class DemoServerClient : IGacServerClient
+public sealed partial class DemoServerClient : IGacServerClient
 {
     private readonly Lock _lock = new();
     private readonly Random _rng = new(20261031);
@@ -44,6 +44,7 @@ public sealed class DemoServerClient : IGacServerClient
         _sim = new DemoSimulator(_rng);
         DemoSchool.Populate(this, _rng);
         _shared = new SharedPresetInfo(GacJson.Serialize(DemoSchool.SharedPresets()), DateTimeOffset.Now.AddDays(-3), "owner");
+        SeedChange002();
     }
 
     public bool IsDemo => true;
@@ -64,7 +65,7 @@ public sealed class DemoServerClient : IGacServerClient
         _reports.Add(row);
         _latest[(pc.Id, module)] = row;
     }
-    internal void SeedAudit(DateTimeOffset at, string actor, string action, string? target, string? detail) =>
+    internal void SeedAudit(DateTimeOffset at, string actor, string action, string? target = null, string? detail = null) =>
         _audit.Add(new AuditEntry(++_auditId, at, actor, action, target, detail));
     internal DemoSimulator Simulator => _sim;
 
@@ -85,6 +86,7 @@ public sealed class DemoServerClient : IGacServerClient
         lock (_lock)
         {
             if (_ownerSignedUp) throw new GacClientException("이미 최고 관리자 계정이 있습니다. 회원가입은 한 번만 할 수 있습니다.");
+            if (!_installComplete) throw new GacClientException(InstallIncompleteMessage);
             if (string.IsNullOrWhiteSpace(request.UserName) || request.UserName.Trim().Length < 3) throw new GacClientException("아이디는 3자 이상이어야 합니다.");
             if (string.IsNullOrWhiteSpace(request.DisplayName)) throw new GacClientException("이름을 입력하세요.");
             var pw = request.Password ?? "";
@@ -397,11 +399,15 @@ public sealed class DemoServerClient : IGacServerClient
         var (file, result) = PresetValidator.Parse(r.PresetJson.TrimStart().StartsWith('{') && r.PresetJson.Contains("\"presets\"") ? r.PresetJson : $"{{\"version\":1,\"presets\":[{r.PresetJson}]}}", allowRunCommand: true);
         if (file == null || file.Presets.Count != 1) throw new GacClientException(file == null ? result.ErrorText : "프리셋은 하나만 담아야 합니다.");
         if (r.Days is < 1 or > 400) throw new GacClientException("기간은 1~400일이어야 합니다.");
-        var targets = r.PcIds.Count + (r.GroupIds?.Sum(g => _pcs.Count(p => p.GroupId == g)) ?? 0);
+        List<string> names;
+        lock (_lock)
+            names = _pcs.Where(p => r.PcIds.Contains(p.Id) || (p.GroupId is { } g && (r.GroupIds?.Contains(g) ?? false))).Select(p => p.Name).Distinct().ToList();
+        var targets = names.Count;
         if (targets == 0) throw new GacClientException("대상 PC를 선택하세요.");
         var hasLock = file.Presets[0].Actions.Any(a => a.Type == PresetActionTypes.LockPc);
         var start = r.StartAt == default ? DateTimeOffset.Now : r.StartAt;
-        var info = new PeriodPresetInfo(Guid.NewGuid().ToString("N"), r.PeriodName, start, start.AddDays(r.Days), Owner.UserName, targets, true, hasLock);
+        var info = new PeriodPresetInfo(Guid.NewGuid().ToString("N"), r.PeriodName, start, start.AddDays(r.Days), Owner.UserName, targets,
+            start <= DateTimeOffset.Now, hasLock, names);
         lock (_lock) { _periods.Insert(0, info); Audit("period.create", r.PeriodName, $"{targets} PCs, {r.Days}d, lock={hasLock}"); }
         return info;
     }

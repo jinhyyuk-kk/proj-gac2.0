@@ -248,6 +248,8 @@ public sealed class PermissionMatrixForm : Form
         Permission.ManagePackages => "배포 패키지 관리",
         Permission.UnlockPc => "PC 잠금 해제",
         Permission.ManageDevices => "기기 승인·차단",
+        Permission.ManageCalendar => "캘린더 관리",
+        Permission.ManageServerShutdown => "서버 PC 종료 설정",
         _ => p.ToString(),
     };
 }

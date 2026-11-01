@@ -15,7 +15,7 @@ public class DemoSafetyTests
 {
     private static readonly string[] Forbidden = ["Gac.Agent", "Gac.Tray", "Gac.Server"];
 
-    private static HashSet<string> ReferenceClosure(Assembly root)
+    internal static HashSet<string> ReferenceClosure(Assembly root)
     {
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var queue = new Queue<AssemblyName>([root.GetName()]);
@@ -39,6 +39,8 @@ public class DemoSafetyTests
         Assert.DoesNotContain(closure, n => n.StartsWith("Gac.Modules.", StringComparison.OrdinalIgnoreCase));
         foreach (var f in Forbidden) Assert.DoesNotContain(f, closure);
         Assert.Contains("Gac.Tray.UI", closure); // UI-only library is allowed: it holds no real implementations
+        Assert.Contains("Gac.ServerAdmin.UI", closure); // GAC 서버 관리 UI with the demo backend (CHANGE-002 §5)
+        Assert.DoesNotContain("Gac.ServerStatus", closure);
     }
 
     [Fact]

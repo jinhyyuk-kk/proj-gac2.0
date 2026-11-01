@@ -20,6 +20,10 @@ public enum Permission
     UnlockPc,
     /// <summary>CHANGE-001 1.2/1.4: approve/revoke/block devices, clear console-first. Default Owner/Admin.</summary>
     ManageDevices,
+    /// <summary>CHANGE-002 §2.2: add/edit/delete lock exemption days (캘린더 관리). Default Owner/Admin.</summary>
+    ManageCalendar,
+    /// <summary>CHANGE-002 §4.2: change the server PC auto-shutdown schedule, skip today, extend (서버 PC 종료 설정). Default Owner/Admin.</summary>
+    ManageServerShutdown,
 }
 
 /// <summary>The fixed role → permission matrix from CLAUDE.md section 5. Enforced on the server; the console only mirrors it.</summary>

@@ -1,4 +1,5 @@
 using Gac.Shared.ClassMode;
+using Gac.Shared.Contracts;
 using Gac.Tray.UI;
 
 namespace Gac.Demo;
@@ -38,7 +39,7 @@ public sealed class DemoClientPcForm : DemoViewForm
 
         var taskbar = new Panel { Dock = DockStyle.Bottom, Height = 40, BackColor = Color.FromArgb(24, 28, 36) };
         var clock = new Label { Dock = DockStyle.Right, Width = 70, ForeColor = Color.White, TextAlign = ContentAlignment.MiddleCenter, Text = DateTime.Now.ToString("HH:mm") };
-        var tray = new Button { Dock = DockStyle.Right, Width = 60, Text = "GAC", FlatStyle = FlatStyle.Flat, ForeColor = Color.White, BackColor = Color.FromArgb(0, 102, 204), Font = Ui.Bold };
+        var tray = new Button { Dock = DockStyle.Right, Width = 44, FlatStyle = FlatStyle.Flat, BackColor = Color.FromArgb(24, 28, 36), Image = GacIcons.GacSized(32).ToBitmap(), ImageAlign = ContentAlignment.MiddleCenter };
         tray.FlatAppearance.BorderSize = 0;
         var menu = BuildTrayMenu();
         tray.Click += (_, _) => menu.Show(tray, new Point(0, -menu.Height));
@@ -55,7 +56,9 @@ public sealed class DemoClientPcForm : DemoViewForm
         side.Controls.Add(SideButton("수업 모드 프리셋 편집", (_, _) => OpenPresetEditor()));
         side.Controls.Add(SideButton("네트워크 자가 진단", (_, _) => OpenNetDiag()));
         side.Controls.Add(SideButton("자동 종료 경고 창", (_, _) => OpenShutdownWarning()));
-        side.Controls.Add(SideButton("PC 잠금 화면 미리 보기", (_, _) => OpenLock()));
+        side.Controls.Add(SideButton("기간 잠금 실행 (점심시간 컴퓨터실 잠금)", (_, _) => OpenLock()));
+        _exemptToggle.CheckedChanged += (_, _) => OnExemptToggled();
+        side.Controls.Add(_exemptToggle);
         side.Controls.Add(new Label { Height = 10, Width = 1 });
         side.Controls.Add(Ui.Label("설치 (체험)", Ui.Bold));
         side.Controls.Add(SideButton("에이전트 설치 화면 보기", (_, _) => OpenAgentInstaller()));
@@ -65,6 +68,40 @@ public sealed class DemoClientPcForm : DemoViewForm
         Controls.Add(Ui.ButtonBar(Ui.Button("닫기", (_, _) => Close(), 80)));
 
         InstallChrome(DemoView.Client);
+
+        // The agent re-checks the exemption list on every poll; if a day becomes an exemption day (e.g. added in the
+        // console calendar) while the lock window is open, the lock closes and explorer.exe restarts (CHANGE-002 §2.2).
+        _exemptToggle.Checked = IsExemptToday();
+        _poll.Tick += (_, _) => { if (_lock != null && IsExemptToday()) CloseLockForExemption(); };
+        Load += (_, _) => _poll.Start();
+        FormClosed += (_, _) => _poll.Dispose();
+    }
+
+    private readonly CheckBox _exemptToggle = new() { Text = "오늘을 잠금 해제일로 체험\n(" + ExemptionCalendar.PresetName + ")", AutoSize = true, Margin = new Padding(0, 10, 0, 0) };
+    private readonly System.Windows.Forms.Timer _poll = new() { Interval = 2000 };
+    private LockForm? _lock;
+
+    internal LockForm? CurrentLock => _lock;
+    internal CheckBox ExemptToggle => _exemptToggle;
+
+    /// <summary>The same decision the agent makes: lock_pc never runs when today (Asia/Seoul, trusted time) is an exemption day.</summary>
+    internal bool IsExemptToday() => ExemptionCalendar.IsExempt(_client.AgentExemptDates(), DateTimeOffset.Now);
+
+    private void OnExemptToggled()
+    {
+        if (_exemptToggle.Checked == IsExemptToday() && !(_exemptToggle.Checked && _lock != null)) return;
+        _client.SetDemoExemptToday(_exemptToggle.Checked);
+        if (_exemptToggle.Checked && _lock != null) CloseLockForExemption();
+        else _status.Text = _exemptToggle.Checked
+            ? "(체험) 오늘은 잠금 해제일입니다. 어떤 기간이든 PC 잠금이 실행되지 않습니다.\n자동 종료·자동 정리 등 다른 기능은 평소처럼 동작합니다."
+            : "(체험) 오늘은 잠금 해제일이 아닙니다. 기간 잠금이 다시 동작합니다.";
+    }
+
+    internal void CloseLockForExemption()
+    {
+        _lock?.ForceClose();
+        _lock = null;
+        _status.Text = "(체험) 잠금 해제일이 시작되어 잠금 화면을 닫고 탐색기(explorer.exe)를 다시 시작했습니다.\n실제 PC에서는 아무 프로그램도 실행되지 않았습니다.";
     }
 
     private static Button SideButton(string text, EventHandler onClick)
@@ -116,9 +153,16 @@ public sealed class DemoClientPcForm : DemoViewForm
     }
 
     /// <summary>Shows the full-screen lock exactly as a client PC would during a period. Nothing is actually locked.</summary>
-    private void OpenLock()
+    internal void OpenLock()
     {
-        var lf = new LockForm("점심시간", 25)
+        if (_lock != null) return;
+        if (IsExemptToday())
+        {
+            _status.Text = "(체험) 오늘은 잠금 해제일이라 잠금 화면이 나타나지 않습니다.";
+            Ui.Info(this, $"오늘은 잠금 해제일({ExemptionCalendar.PresetName})입니다.\n\n기간 프리셋에 PC 잠금이 들어 있어도 오늘은 잠금 화면이 나타나지 않고, 탐색기도 끝내지 않습니다.\n(잠금 해제일은 00:00~23:59:59, 한국 시간 기준이며 PC 시계를 바꿔도 서버 시간으로 판단합니다.)");
+            return;
+        }
+        var lf = new LockForm("점심시간 컴퓨터실 잠금", 25)
         {
             Unlock = (_, pw) => Task.FromResult(string.IsNullOrEmpty(pw)
                 ? (false, "비밀번호를 입력하세요.")
@@ -126,6 +170,8 @@ public sealed class DemoClientPcForm : DemoViewForm
         };
         lf.ExitRequested += (_, _) => { Ui.Info(lf, "(체험) ‘종료하기’는 실제 제품에서 PC를 끕니다. 체험 모드에서는 잠금 화면만 닫습니다."); lf.ForceClose(); };
         lf.Expired += (_, _) => { Ui.Info(this, "(체험) 시간이 다 되어 실제 제품에서는 PC가 종료됩니다."); lf.ForceClose(); };
+        lf.FormClosed += (_, _) => { if (_lock == lf) _lock = null; };
+        _lock = lf;
         lf.Show(this);
     }
 

@@ -50,7 +50,7 @@ public sealed class LockForm : Form
         Controls.Add(center);
 
         KeyDown += (_, e) => { if (e.Alt && e.KeyCode == Keys.F4) e.Handled = true; };
-        FormClosing += (_, e) => { if (e.CloseReason == CloseReason.UserClosing) e.Cancel = true; }; // ignore Alt+F4 / close box
+        FormClosing += (_, e) => { if (!_forceClosing && e.CloseReason == CloseReason.UserClosing) e.Cancel = true; }; // ignore Alt+F4 / close box
         _timer.Tick += (_, _) => Tick();
         Load += (_, _) => Tick();
         _timer.Start();
@@ -89,10 +89,16 @@ public sealed class LockForm : Form
     /// <summary>Closes the lock window programmatically (unlock succeeded or the period ended).</summary>
     public void ForceClose()
     {
+        if (IsDisposed) return;
+        if (InvokeRequired) { BeginInvoke(ForceClose); return; }
         _timer.Stop();
-        FormClosing -= null;
-        BeginInvoke(() => { Hide(); Close(); Dispose(); });
+        _forceClosing = true; // Form.Close() reports CloseReason.UserClosing, so the Alt+F4 guard must be bypassed explicitly
+        Hide();
+        Close();
+        Dispose();
     }
+
+    private bool _forceClosing;
 
     protected override void Dispose(bool disposing)
     {

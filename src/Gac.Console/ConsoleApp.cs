@@ -16,9 +16,13 @@ public static class ConsoleApp
         Application.SetDefaultFont(Ui.Font);
     }
 
+    /// <summary>Every Console window shows the admin icon (CHANGE-002 §1.4).</summary>
+    public static void UseConsoleIcon() => Ui.AppIcon = ConsoleIcons.Admin;
+
     /// <summary>Real product: connect (first time), log in or create the Owner, then show the main window.</summary>
     public static void RunReal()
     {
+        UseConsoleIcon();
         while (true)
         {
             var connection = ConsoleConnection.Load();

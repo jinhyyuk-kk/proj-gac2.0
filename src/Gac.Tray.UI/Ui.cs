@@ -15,6 +15,12 @@ public static class Ui
     public static readonly Color Muted = Color.FromArgb(110, 110, 110);
     public static readonly Color Panel = Color.FromArgb(244, 246, 249);
 
+    /// <summary>
+    /// Window icon for every form built with <see cref="Apply"/> (CHANGE-002 §1.4): the Console sets the admin icon, the
+    /// tray / server-management app / demo set the GAC icon. Null = no icon shown.
+    /// </summary>
+    public static Icon? AppIcon { get; set; }
+
     public static void Apply(Form f, string title, Size size, bool resizable = true)
     {
         f.Text = title;
@@ -23,7 +29,8 @@ public static class Ui
         f.AutoScaleDimensions = new SizeF(96f, 96f);
         f.ClientSize = size;
         f.StartPosition = FormStartPosition.CenterParent;
-        f.ShowIcon = false;
+        f.ShowIcon = AppIcon != null;
+        if (AppIcon != null) f.Icon = AppIcon;
         if (!resizable)
         {
             f.FormBorderStyle = FormBorderStyle.FixedDialog;

@@ -113,6 +113,29 @@ public sealed class HttpGacServerClient : IGacServerClient
     public Task<EnrollmentInfo> GetEnrollmentAsync() => Get<EnrollmentInfo>("/api/enrollment");
     public Task<EnrollmentInfo> RegenerateEnrollmentAsync() => Send<EnrollmentInfo>(HttpMethod.Post, "/api/enrollment/regenerate", null);
 
+    // CHANGE-002 §2 calendar
+    public Task<IReadOnlyList<ExemptionDay>> GetExemptionDaysAsync() => GetList<ExemptionDay>("/api/calendar/exemptions");
+    public Task<ExemptionDay> SaveExemptionDayAsync(string? id, SaveExemptionDayRequest r) => id == null
+        ? Send<ExemptionDay>(HttpMethod.Post, "/api/calendar/exemptions", r)
+        : Send<ExemptionDay>(HttpMethod.Put, $"/api/calendar/exemptions/{Uri.EscapeDataString(id)}", r);
+    public Task DeleteExemptionDayAsync(string id) => Send<object>(HttpMethod.Delete, $"/api/calendar/exemptions/{Uri.EscapeDataString(id)}", null);
+    public Task SkipExemptionOccurrenceAsync(string id, DateOnly date) =>
+        Send<object>(HttpMethod.Post, $"/api/calendar/exemptions/{Uri.EscapeDataString(id)}/skip", new SkipOccurrenceRequest(date));
+
+    // CHANGE-002 §4 alerts + server management
+    public Task<IReadOnlyList<OverloadAlert>> GetAlertsAsync() => GetList<OverloadAlert>("/api/alerts");
+    public Task MarkAlertsReadAsync(IReadOnlyList<string> ids) => Send<object>(HttpMethod.Post, "/api/alerts/read", new MarkAlertsReadRequest(ids));
+    public Task<ServerShutdownSettings> GetServerShutdownAsync() => Get<ServerShutdownSettings>("/api/server/shutdown");
+    public Task SaveServerShutdownAsync(ServerShutdownSettings s) => Send<object>(HttpMethod.Put, "/api/server/shutdown", s);
+    public Task<ServerShutdownStatus> GetServerShutdownStatusAsync() => Get<ServerShutdownStatus>("/api/server/shutdown/status");
+    public Task SkipServerShutdownTodayAsync() => Send<object>(HttpMethod.Post, "/api/server/shutdown/skip-today", null);
+    public Task ExtendServerShutdownAsync() => Send<object>(HttpMethod.Post, "/api/server/shutdown/extend", null);
+    public Task<OverloadSettings> GetOverloadSettingsAsync() => Get<OverloadSettings>("/api/server/overload");
+    public Task SaveOverloadSettingsAsync(OverloadSettings s) => Send<object>(HttpMethod.Put, "/api/server/overload", s);
+    public Task<IReadOnlyList<OverloadBlock>> GetOverloadBlocksAsync() => GetList<OverloadBlock>("/api/server/overload/blocks");
+    public Task UnblockAsync(string key) => Send<object>(HttpMethod.Post, $"/api/server/overload/blocks/{Uri.EscapeDataString(key)}/unblock", null);
+    public Task BlockPermanentlyAsync(string key) => Send<object>(HttpMethod.Post, $"/api/server/overload/blocks/{Uri.EscapeDataString(key)}/permanent", null);
+
     private Task<T> Get<T>(string url) => Execute<T>(() => _http.GetAsync(url));
 
     private async Task<IReadOnlyList<T>> GetList<T>(string url) => await Get<List<T>>(url);

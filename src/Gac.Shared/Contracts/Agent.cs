@@ -40,7 +40,8 @@ public sealed record PollResponse(
     int PollSeconds,
     bool Revoked = false,
     string? RevokedReason = null,
-    IReadOnlyList<PeriodPreset>? Periods = null);
+    IReadOnlyList<PeriodPreset>? Periods = null,
+    AgentCalendar? Calendar = null);
 
 public enum ReportTrigger { Command, Schedule, Tray, Event }
 

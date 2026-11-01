@@ -12,6 +12,9 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../../tools/Gac.IconTool/Gac.IconTool.csproj" />
+    <!-- Built first so their exes can be inspected; not referenced as assemblies. -->
+    <ProjectReference Include="../../src/Gac.Console/Gac.Console.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="../../src/Gac.Demo/Gac.Demo.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
   <ItemGroup>
     <Using Include="Xunit" />

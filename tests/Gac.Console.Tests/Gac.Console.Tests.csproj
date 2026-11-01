@@ -13,6 +13,7 @@
   <ItemGroup>
     <ProjectReference Include="../../src/Gac.Console/Gac.Console.csproj" />
     <ProjectReference Include="../../src/Gac.Demo/Gac.Demo.csproj" />
+    <ProjectReference Include="../../src/Gac.ServerAdmin.UI/Gac.ServerAdmin.UI.csproj" />
   </ItemGroup>
   <ItemGroup>
     <Using Include="Xunit" />

@@ -67,6 +67,26 @@ public interface IGacServerClient : IDisposable
     Task SaveSettingsAsync(ServerSettings settings);
     Task<EnrollmentInfo> GetEnrollmentAsync();
     Task<EnrollmentInfo> RegenerateEnrollmentAsync();
+
+    // CHANGE-002 §2: calendar and lock exemption days
+    Task<IReadOnlyList<ExemptionDay>> GetExemptionDaysAsync();
+    Task<ExemptionDay> SaveExemptionDayAsync(string? id, SaveExemptionDayRequest request);
+    Task DeleteExemptionDayAsync(string id);
+    Task SkipExemptionOccurrenceAsync(string id, DateOnly date);
+
+    // CHANGE-002 §4: overload alerts (알림) and server management (서버 관리)
+    Task<IReadOnlyList<OverloadAlert>> GetAlertsAsync();
+    Task MarkAlertsReadAsync(IReadOnlyList<string> ids);
+    Task<ServerShutdownSettings> GetServerShutdownAsync();
+    Task SaveServerShutdownAsync(ServerShutdownSettings settings);
+    Task<ServerShutdownStatus> GetServerShutdownStatusAsync();
+    Task SkipServerShutdownTodayAsync();
+    Task ExtendServerShutdownAsync();
+    Task<OverloadSettings> GetOverloadSettingsAsync();
+    Task SaveOverloadSettingsAsync(OverloadSettings settings);
+    Task<IReadOnlyList<OverloadBlock>> GetOverloadBlocksAsync();
+    Task UnblockAsync(string key);
+    Task BlockPermanentlyAsync(string key);
 }
 
 /// <summary>A failure with a Korean message suitable for showing to the operator.</summary>
