@@ -53,6 +53,7 @@ public static class ServerApp
 
         var time = TimeProvider.System;
         builder.Services.AddSingleton(options);
+        builder.Services.AddSingleton(new InstallState(options.DataDir));
         builder.Services.AddSingleton(time);
         builder.Services.AddSingleton(identity);
         builder.Services.AddSingleton(db);
@@ -91,6 +92,19 @@ public static class ServerApp
             ctx.Response.StatusCode = status;
             await ctx.Response.WriteAsJsonAsync(new ApiError(message), GacJson.Options);
         }));
+        // CHANGE-002 §3.2: until the firewall step is done the server accepts no enrollment, no agent traffic and no sign-up.
+        app.Use(async (ctx, next) =>
+        {
+            var p = ctx.Request.Path;
+            if ((p.StartsWithSegments("/api/enroll") || p.StartsWithSegments("/api/agent") || p.StartsWithSegments("/api/setup/owner"))
+                && !ctx.RequestServices.GetRequiredService<InstallState>().IsComplete)
+            {
+                ctx.Response.StatusCode = 503;
+                await ctx.Response.WriteAsJsonAsync(new ApiError(InstallState.IncompleteMessage), GacJson.Options);
+                return;
+            }
+            await next(ctx);
+        });
         Endpoints.Map(app);
         return app;
     }

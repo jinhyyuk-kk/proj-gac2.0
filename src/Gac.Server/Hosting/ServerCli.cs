@@ -5,11 +5,16 @@ using Gac.Server.Pcs;
 namespace Gac.Server.Hosting;
 
 /// <summary>
-/// Command-line verbs used by the installer:
-///   Gac.Server.exe                     run (as service or console)
-///   Gac.Server.exe install [--port N]  create data, cert, firewall rule, service
+/// Command-line verbs used by the installer and the GAC 서버 관리 app:
+///   Gac.Server.exe                                   run (as service or console)
+///   Gac.Server.exe install [--port N]                create data, cert, service — the install stays "설치 미완료"
+///   Gac.Server.exe firewall --range CIDR [--port N] [--result FILE]
+///                                                    CHANGE-002 §3: create the rule, read it back, mark the install complete
+///   Gac.Server.exe apply-firewall [--range CIDR | --add CIDR | (re-detect)] [--result FILE]
+///   Gac.Server.exe detect-range [--result FILE]
 ///   Gac.Server.exe uninstall [--delete-data]
-///   Gac.Server.exe show-code           print the enrollment code
+///   Gac.Server.exe show-code
+/// --result writes "OK" or "ERROR: message" (UTF-8) for the Inno Setup pages, which cannot read stdout.
 /// </summary>
 public static class ServerCli
 {
@@ -20,6 +25,7 @@ public static class ServerCli
     {
         var verb = args.FirstOrDefault()?.ToLowerInvariant() ?? "run";
         var dataDir = Environment.GetEnvironmentVariable("GAC_SERVER_DATA") is { Length: > 0 } d ? d : ServerOptions.DefaultDataDir;
+        var result = ParseArg(args, "--result");
         switch (verb)
         {
             case "run":
@@ -30,44 +36,47 @@ public static class ServerCli
                 return 0;
             }
             case "install":
-                return Install(dataDir, ParsePort(args), ParseArg(args, "--range"));
+                return Install(dataDir, ParsePort(args));
+            case "firewall":
+                return Report(result, OpenFirewall(dataDir, ParseArg(args, "--range"), ParsePortOrNull(args)));
+            case "apply-firewall":
+                return Report(result, ApplyFirewall(dataDir, ParseArg(args, "--range"), ParseArg(args, "--add")));
             case "uninstall":
                 return Uninstall(dataDir, args.Contains("--delete-data", StringComparer.OrdinalIgnoreCase));
             case "show-code":
                 Console.WriteLine(ShowCode(dataDir));
                 return 0;
             case "detect-range":
-                Console.WriteLine(LanDetection.DetectCidr() ?? "");
-                return 0;
-            case "apply-firewall": // re-apply the firewall rule for the configured/overridden range (used by the status app)
             {
-                var cfg = ServerIdentity.LoadConfig(dataDir);
-                var ranges = ParseArg(args, "--range") is { } r && LanDetection.IsValidCidr(r) ? [r]
-                    : cfg.Ranges is { Length: > 0 } existing ? existing : DetectRanges();
-                ServerIdentity.SaveConfig(dataDir, cfg with { Ranges = ranges });
-                ApplyFirewall(cfg.Port, ranges);
-                Console.WriteLine(string.Join(",", ranges));
+                var cidr = LanDetection.DetectCidr() ?? "";
+                Console.WriteLine(cidr);
+                if (result != null) File.WriteAllText(result, cidr);
                 return 0;
             }
             default:
-                Console.Error.WriteLine("Usage: Gac.Server.exe [run|install [--port N] [--range CIDR]|uninstall [--delete-data]|show-code|detect-range|apply-firewall [--range CIDR]]");
+                Console.Error.WriteLine("Usage: Gac.Server.exe [run|install [--port N]|firewall --range CIDR [--port N]|apply-firewall [--range CIDR|--add CIDR]|detect-range|uninstall [--delete-data]|show-code] [--result FILE]");
                 return 2;
         }
     }
 
-    private static int ParsePort(string[] args)
+    private static int Report(string? resultFile, string? error)
     {
-        var i = Array.FindIndex(args, a => a.Equals("--port", StringComparison.OrdinalIgnoreCase));
-        return i >= 0 && i + 1 < args.Length && int.TryParse(args[i + 1], out var p) && p is > 0 and < 65536 ? p : ServerOptions.DefaultPort;
+        if (error == null) Console.WriteLine("OK"); else Console.Error.WriteLine(error);
+        if (resultFile != null)
+            try { File.WriteAllText(resultFile, error == null ? "OK" : "ERROR: " + error, new System.Text.UTF8Encoding(false)); } catch (IOException) { }
+        return error == null ? 0 : 1;
     }
+
+    private static int ParsePort(string[] args) => ParsePortOrNull(args) ?? ServerOptions.DefaultPort;
+
+    private static int? ParsePortOrNull(string[] args) =>
+        ParseArg(args, "--port") is { } s && int.TryParse(s, out var p) && p is > 0 and < 65536 ? p : null;
 
     private static string? ParseArg(string[] args, string name)
     {
         var i = Array.FindIndex(args, a => a.Equals(name, StringComparison.OrdinalIgnoreCase));
         return i >= 0 && i + 1 < args.Length ? args[i + 1] : null;
     }
-
-    private static string[] DetectRanges() => LanDetection.DetectCidr() is { } c ? [c] : [];
 
     private static string ShowCode(string dataDir)
     {
@@ -77,46 +86,98 @@ public static class ServerCli
         return pcs.EnrollCode;
     }
 
-    private static string EnsureSetupCode(string dataDir)
+    private static string? SetupCode(string dataDir, bool ensure)
     {
         var db = new Db(Path.Combine(dataDir, "gac.db"));
         db.EnsureSchema();
-        return new Accounts.AccountService(db, new AuditLog(db, TimeProvider.System), TimeProvider.System).EnsureSetupCode();
+        var acc = new Accounts.AccountService(db, new AuditLog(db, TimeProvider.System), TimeProvider.System);
+        return ensure ? acc.EnsureSetupCode() : acc.GetSetupCode();
     }
 
     /// <summary>
-    /// One inbound TCP rule allowing only the detected range(s) on only the port, bound to this server executable.
-    /// profile=any is intentional (school LANs are often classified Public, CHANGE-001 §2) but the rule stays scoped by
-    /// remoteip and program. Fails closed: with no valid range it restricts to the local subnet rather than the world.
+    /// enrollment.txt: address, enroll code, range, thumbprint — and the setup code only once the install is complete
+    /// (CHANGE-002 §3.2: the setup code is shown only after the firewall step).
     /// </summary>
-    private static void ApplyFirewall(int port, string[] ranges)
+    internal static void WriteEnrollmentFile(string dataDir)
     {
-        Run("netsh", $"advfirewall firewall delete rule name=\"{FirewallRuleName}\"", ignoreErrors: true);
-        var valid = ranges.Where(LanDetection.IsValidCidr).ToArray();
-        var remote = valid.Length > 0 ? string.Join(",", valid) : "localsubnet"; // fail closed to local subnet
-        var exe = Environment.ProcessPath!;
-        Run("netsh", $"advfirewall firewall add rule name=\"{FirewallRuleName}\" dir=in action=allow protocol=TCP localport={port} remoteip={remote} program=\"{exe}\" profile=any");
+        var cfg = ServerIdentity.LoadConfig(dataDir);
+        using var id = ServerIdentity.LoadOrCreate(dataDir);
+        var setup = cfg.IsInstallComplete ? SetupCode(dataDir, ensure: false) : null;
+        var ranges = cfg.Ranges is { Length: > 0 } r ? string.Join(", ", r) : "(미설정)";
+        File.WriteAllText(Path.Combine(dataDir, "enrollment.txt"),
+            $"서버 주소: {Environment.MachineName}:{cfg.Port}\r\n포트: {cfg.Port}\r\n교내망 대역: {ranges}\r\n등록 코드: {ShowCode(dataDir)}\r\n" +
+            (cfg.IsInstallComplete
+                ? $"설치 코드(최초 회원가입용): {setup ?? "(회원가입 완료됨)"}\r\n"
+                : "설치 코드: 방화벽 열기를 마치면 표시됩니다.\r\n") +
+            $"인증서 지문(SHA-256): {id.Thumbprint}\r\n");
     }
 
-    /// <summary>Idempotent: safe to run again on upgrade. Keeps existing cert, keys and database.</summary>
-    private static int Install(string dataDir, int port, string? range)
+    /// <summary>
+    /// CHANGE-002 §3.1 step 3: TCP, that port only, remote address = that LAN range only, all profiles. The rule is read
+    /// back and verified; only then is the install marked complete and the setup code written.
+    /// </summary>
+    internal static string? OpenFirewall(string dataDir, string? range, int? port,
+        Func<int, IReadOnlyList<string>, string?>? apply = null, Func<FirewallRuleInfo?>? readBack = null, Action<string>? serviceVerb = null)
+    {
+        if (!LanDetection.IsValidCidr(range)) return "교내망 대역 형식이 올바르지 않습니다 (예: 10.20.0.0/22).";
+        var cfg = ServerIdentity.LoadConfig(dataDir);
+        var newPort = port ?? cfg.Port;
+        string[] ranges = [Firewall.Normalize(range!)];
+        var err = (apply ?? ((p, r) => Firewall.Apply(p, r, Environment.ProcessPath!)))(newPort, ranges);
+        if (err != null) return err;
+        err = Firewall.Verify((readBack ?? Firewall.ReadBack)(), newPort, ranges);
+        if (err != null) return "방화벽 규칙을 확인하지 못했습니다: " + err;
+        ServerIdentity.SaveConfig(dataDir, cfg with { Port = newPort, Ranges = ranges, InstallComplete = true });
+        WriteEnrollmentFile(dataDir);
+        if (newPort != cfg.Port)
+        {
+            // Kestrel binds the port at start-up, so a changed port needs a service restart.
+            var svc = serviceVerb ?? (v => Run("sc.exe", $"{v} {ServiceName}", ignoreErrors: true));
+            svc("stop");
+            Thread.Sleep(2000);
+            svc("start");
+        }
+        return null;
+    }
+
+    /// <summary>[대역 다시 감지] (no args), replace with --range, or [대역 추가] with --add. Keeps the install state.</summary>
+    private static string? ApplyFirewall(string dataDir, string? replace, string? add)
+    {
+        var cfg = ServerIdentity.LoadConfig(dataDir);
+        string[] ranges;
+        if (add != null)
+        {
+            if (!LanDetection.IsValidCidr(add)) return "대역 형식이 올바르지 않습니다 (예: 10.20.0.0/22).";
+            ranges = [.. (cfg.Ranges ?? []).Append(Firewall.Normalize(add)).Distinct()];
+        }
+        else if (replace != null)
+        {
+            if (!LanDetection.IsValidCidr(replace)) return "대역 형식이 올바르지 않습니다 (예: 10.20.0.0/22).";
+            ranges = [Firewall.Normalize(replace)];
+        }
+        else ranges = LanDetection.DetectCidr() is { } c ? [c] : [];
+        if (ranges.Length == 0) return "교내망 대역을 감지하지 못했습니다. [대역 추가]로 직접 입력하세요.";
+        var err = Firewall.Apply(cfg.Port, ranges, Environment.ProcessPath!) ?? Firewall.Verify(Firewall.ReadBack(), cfg.Port, ranges);
+        if (err != null) return err;
+        ServerIdentity.SaveConfig(dataDir, cfg with { Ranges = ranges });
+        WriteEnrollmentFile(dataDir);
+        Console.WriteLine(string.Join(",", ranges));
+        return null;
+    }
+
+    /// <summary>Idempotent: safe to run again on upgrade. Keeps existing cert, keys, database and install state.</summary>
+    private static int Install(string dataDir, int port)
     {
         if (Path.GetDirectoryName(dataDir) is { } parent) Gac.Shared.Security.SecureDirectory.Ensure(parent);
         Gac.Shared.Security.SecureDirectory.Ensure(dataDir);
-        var existing = ServerIdentity.LoadConfig(dataDir);
         var hadConfig = File.Exists(Path.Combine(dataDir, "server.json"));
-        if (hadConfig) port = existing.Port;
-        var ranges = range is { } r && LanDetection.IsValidCidr(r) ? [r] : hadConfig && existing.Ranges is { Length: > 0 } ? existing.Ranges : DetectRanges();
-        ServerIdentity.SaveConfig(dataDir, new ServerFileConfig(port, ranges));
-        using (var id = ServerIdentity.LoadOrCreate(dataDir))
-        {
-            var code = ShowCode(dataDir);
-            var setup = EnsureSetupCode(dataDir);
-            File.WriteAllText(Path.Combine(dataDir, "enrollment.txt"),
-                $"서버 주소: {Environment.MachineName}:{port}\r\n등록 코드: {code}\r\n설치 코드(최초 회원가입용): {setup}\r\n교내망 대역: {(ranges.Length == 0 ? "(감지 실패 — 수동 설정 필요)" : string.Join(", ", ranges))}\r\n인증서 지문(SHA-256): {id.Thumbprint}\r\n");
-        }
-
-        ApplyFirewall(port, ranges);
+        var existing = ServerIdentity.LoadConfig(dataDir);
+        // A fresh install is "설치 미완료" until the firewall step; an upgrade keeps its state (old configs count as complete).
+        var cfg = hadConfig ? existing : new ServerFileConfig(port, [], InstallComplete: false);
+        ServerIdentity.SaveConfig(dataDir, cfg);
+        using (ServerIdentity.LoadOrCreate(dataDir)) { }
+        SetupCode(dataDir, ensure: true);
+        WriteEnrollmentFile(dataDir);
 
         var exe = Environment.ProcessPath!;
         if (Run("sc.exe", $"query {ServiceName}", ignoreErrors: true) != 0)
@@ -134,7 +195,7 @@ public static class ServerCli
         Run("sc.exe", $"stop {ServiceName}", ignoreErrors: true);
         WaitForStop();
         Run("sc.exe", $"delete {ServiceName}", ignoreErrors: true);
-        Run("netsh", $"advfirewall firewall delete rule name=\"{FirewallRuleName}\"", ignoreErrors: true);
+        Firewall.Delete();
         if (deleteData && Directory.Exists(dataDir))
         {
             try { Directory.Delete(dataDir, recursive: true); }

@@ -27,7 +27,40 @@ public sealed class ServerOptions
 }
 
 /// <param name="Ranges">CIDR ranges allowed through the firewall (CHANGE-001 §2). Only controls who may reach the port.</param>
-public sealed record ServerFileConfig(int Port, string[]? Ranges = null);
+/// <param name="InstallComplete">CHANGE-002 §3: false after file install until the firewall step created and verified the
+/// rule. Null = a config written before CHANGE-002 (an upgraded, already working server) and counts as complete.</param>
+public sealed record ServerFileConfig(int Port, string[]? Ranges = null, bool? InstallComplete = null)
+{
+    public bool IsInstallComplete => InstallComplete != false;
+}
+
+/// <summary>
+/// "설치 미완료" gate (CHANGE-002 §3.2). Re-reads server.json at most every few seconds, so the service notices the
+/// firewall step finished in the installer or in GAC 서버 관리 without a restart.
+/// </summary>
+public sealed class InstallState(string dataDir)
+{
+    public const string IncompleteMessage = "서버 설치가 끝나지 않았습니다. 관리 PC에서 [방화벽 열기]를 마쳐야 PC 등록과 회원가입을 받을 수 있습니다.";
+    private readonly Lock _lock = new();
+    private DateTime _checkedAt = DateTime.MinValue;
+    private bool _complete;
+
+    public bool IsComplete
+    {
+        get
+        {
+            lock (_lock)
+            {
+                if (DateTime.UtcNow - _checkedAt > TimeSpan.FromSeconds(3))
+                {
+                    _complete = ServerIdentity.LoadConfig(dataDir).IsInstallComplete;
+                    _checkedAt = DateTime.UtcNow;
+                }
+                return _complete;
+            }
+        }
+    }
+}
 
 /// <summary>Self-signed TLS certificate and ECDSA preset-signing key, created at install time.</summary>
 public sealed class ServerIdentity : IDisposable
