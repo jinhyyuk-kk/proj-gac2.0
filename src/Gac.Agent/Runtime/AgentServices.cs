@@ -77,6 +77,7 @@ public sealed class PollWorker(AgentCore core, TimeProvider time, ILogger<PollWo
         }
         core.SetDeviceApproved(true); // server accepted this device (lets the tray trust a UPS battery on a desktop)
         core.SetPeriods(resp.Periods);
+        core.Lock.Reconcile(core.Periods); // drive PC locks for active lock_pc periods (CHANGE-001 2.4)
         if (resp.Policy != null) core.ApplyPolicy(resp.Policy, resp.PolicyVersion);
 
         var rejections = new List<CommandRejection>();

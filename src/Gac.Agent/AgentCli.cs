@@ -68,6 +68,7 @@ public static class AgentCli
         builder.Services.AddHostedService<Hardware.ServiceStartupGuard>(); // laptop check site #2 (runs first)
         builder.Services.AddHostedService<TrayPipeWorker>();
         builder.Services.AddHostedService<PollWorker>();
+        builder.Services.AddHostedService<TrayWatchdog>(); // keeps the tray running (CHANGE-001 2.2)
         builder.Services.AddHostedService<SchedulerWorker>();
         return builder.Build();
     }

@@ -31,6 +31,9 @@ public sealed class ServerClient : IDisposable
 
     public Task UploadRejectionsAsync(IReadOnlyList<CommandRejection> r, CancellationToken ct) => PostAsync<object>("/api/agent/rejections", new RejectionUpload(r), ct);
 
+    /// <summary>Forwards a locked PC's unlock credentials to the server, which authorizes and audits them (CHANGE-001 2.4).</summary>
+    public Task<UnlockResponse> UnlockAsync(UnlockRequest req, CancellationToken ct) => PostAsync<UnlockResponse>("/api/agent/unlock", req, ct)!;
+
     private async Task<T?> PostAsync<T>(string path, object body, CancellationToken ct)
     {
         var bytes = Encoding.UTF8.GetBytes(GacJson.Serialize(body));

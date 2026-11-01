@@ -16,10 +16,11 @@ public sealed class TrayApp : ApplicationContext
     private readonly NotifyIcon _icon = new() { Text = "GAC 2.0", Visible = true };
     private readonly ContextMenuStrip _menu = new() { Font = Ui.Font };
     private readonly AgentPipeClient _pipe = new();
-    private readonly PresetStore _store = new(PresetStore.DefaultUserPath);
     private readonly PresetRunner _runner = new(new WindowsPresetActionExecutor());
     private readonly SynchronizationContext _ui;
     private readonly Control _invoker = new();
+    private readonly Dictionary<string, LockForm> _locks = new();
+    private readonly System.Windows.Forms.Timer _explorerKiller = new() { Interval = 1500 };
     private ShutdownWarningForm? _warning;
     private AgentStatus? _status;
     private bool _loginPresetsDone;
@@ -32,6 +33,7 @@ public sealed class TrayApp : ApplicationContext
         _icon.ContextMenuStrip = _menu;
         _icon.MouseClick += (_, e) => { if (e.Button == MouseButtons.Left) ShowMenu(); };
         _menu.Opening += async (_, _) => await BuildMenuAsync();
+        _explorerKiller.Tick += OnExplorerKillerTick;
         _pipe.OnEvent = OnServiceEventAsync;
         _pipe.Start();
         _ = RunLoginPresetsAsync();
@@ -47,8 +49,23 @@ public sealed class TrayApp : ApplicationContext
     {
         _status = await _pipe.GetStatusAsync() ?? _status;
         var (shared, _) = PresetStore.LoadShared(_status?.SharedPresets, _status?.PresetPublicKeyPem);
-        var (user, _) = _store.LoadUser();
+        var (user, _) = await LoadPcPresetsAsync();
         return [.. shared, .. user.Presets];
+    }
+
+    // Per-PC teacher presets live with the SYSTEM service (CHANGE-001 2.1); the tray reads/writes them over the pipe.
+    private async Task<(PresetFile File, string? Error)> LoadPcPresetsAsync()
+    {
+        var r = await _pipe.RequestAsync(TrayRequest.GetPresets, null, TimeSpan.FromSeconds(5));
+        if (!r.Ok || r.DataJson == null) return (new PresetFile(), r.Ok ? null : r.Message);
+        var (file, result) = PresetValidator.Parse(r.DataJson, allowRunCommand: false);
+        return file == null ? (new PresetFile(), result.ErrorText) : (file, null);
+    }
+
+    private async Task<string?> SavePcPresetsAsync(PresetFile file)
+    {
+        var r = await _pipe.RequestAsync(TrayRequest.SavePresets, new PresetsBody(GacJson.Serialize(file)), TimeSpan.FromSeconds(5));
+        return r.Ok ? null : r.Message;
     }
 
     private async Task BuildMenuAsync()
@@ -81,15 +98,11 @@ public sealed class TrayApp : ApplicationContext
         _menu.Items.Add(new ToolStripMenuItem(state) { Enabled = false });
     }
 
-    private void OpenEditor()
+    private async void OpenEditor()
     {
-        var (file, error) = _store.LoadUser();
+        var (file, error) = await LoadPcPresetsAsync();
         if (error != null) Ui.Error(null, error);
-        using var editor = new PresetEditorForm(file, allowRunCommand: false, f =>
-        {
-            try { _store.SaveUser(f); return Task.FromResult<string?>(null); }
-            catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidOperationException) { return Task.FromResult<string?>("저장하지 못했습니다: " + e.Message); }
-        }, p => RunPresetAsync(p, showResult: true), "수업 모드 프리셋 편집");
+        using var editor = new PresetEditorForm(file, allowRunCommand: false, SavePcPresetsAsync, p => RunPresetAsync(p, showResult: true), "수업 모드 프리셋 편집");
         editor.StartPosition = FormStartPosition.CenterScreen;
         editor.ShowDialog();
     }
@@ -168,9 +181,71 @@ public sealed class TrayApp : ApplicationContext
                 var body = msg.Body<WallpaperBody>();
                 return Wallpaper.Reset(body?.Path);
             }
+            case nameof(ServiceEvent.Lock):
+            {
+                var body = msg.Body<LockBody>();
+                if (body != null) OnUi(() => ShowLock(body));
+                return new PipeResponse(true, "ok");
+            }
+            case nameof(ServiceEvent.Unlock):
+            {
+                var body = msg.Body<LockBody>();
+                if (body != null) OnUi(() => CloseLock(body.PeriodId));
+                return new PipeResponse(true, "ok");
+            }
             default:
                 return new PipeResponse(false, "알 수 없는 요청");
         }
+    }
+
+    // ---------- PC lock (CHANGE-001 2.4) ----------
+    private void ShowLock(LockBody body)
+    {
+        if (_locks.ContainsKey(body.PeriodId)) return; // already locked for this period
+        var form = new LockForm(body.PeriodName, body.CountdownMinutes * 60)
+        {
+            Unlock = async (user, pw) =>
+            {
+                var r = await _pipe.RequestAsync(TrayRequest.Unlock, new UnlockRequest(body.PeriodId, user, pw), TimeSpan.FromSeconds(15));
+                if (r.Ok) OnUi(() => { RestartExplorer(); StopExplorerKiller(); });
+                return (r.Ok, r.Message);
+            },
+        };
+        form.ExitRequested += async (_, _) => await _pipe.RequestAsync(TrayRequest.ShutdownNow, null, TimeSpan.FromSeconds(10));
+        form.Expired += async (_, _) => await _pipe.RequestAsync(TrayRequest.ShutdownNow, null, TimeSpan.FromSeconds(10));
+        form.FormClosed += (_, _) => { _locks.Remove(body.PeriodId); if (_locks.Count == 0) StopExplorerKiller(); };
+        _locks[body.PeriodId] = form;
+        EndExplorer();
+        StartExplorerKiller();
+        form.Show();
+        form.Activate();
+    }
+
+    private void CloseLock(string periodId)
+    {
+        if (_locks.TryGetValue(periodId, out var form)) form.ForceClose();
+    }
+
+    private void StartExplorerKiller() { _explorerKiller.Start(); }
+    private void StopExplorerKiller() { if (_locks.Count == 0) _explorerKiller.Stop(); }
+
+    private void OnExplorerKillerTick(object? sender, EventArgs e) { if (_locks.Count > 0) EndExplorer(); }
+
+    private static void EndExplorer()
+    {
+        // Ends the user's own explorer.exe (desktop, taskbar, Start). User-context: no admin rights needed.
+        foreach (var p in System.Diagnostics.Process.GetProcessesByName("explorer"))
+        {
+            try { if (p.SessionId == System.Diagnostics.Process.GetCurrentProcess().SessionId) p.Kill(); }
+            catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception) { }
+            finally { p.Dispose(); }
+        }
+    }
+
+    private static void RestartExplorer()
+    {
+        try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "explorer.exe")) { UseShellExecute = true }); }
+        catch (Exception e) when (e is System.ComponentModel.Win32Exception or InvalidOperationException) { }
     }
 
     private void ShowShutdownWarning(ShutdownWarningBody w)

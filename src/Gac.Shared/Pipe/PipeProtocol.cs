@@ -21,6 +21,12 @@ public enum TrayRequest
     ShutdownExtend,
     ShutdownNow,
     SubmitNetDiagReport,
+    /// <summary>Read the per-PC teacher presets (CHANGE-001 2.1: stored by the SYSTEM service in ProgramData, per PC).</summary>
+    GetPresets,
+    /// <summary>Save the per-PC teacher presets. The service validates them in teacher context (no run_command/lock_pc).</summary>
+    SavePresets,
+    /// <summary>Unlock a locked PC: the service forwards the credentials to the server and, on success, lifts the lock until restart.</summary>
+    Unlock,
 }
 
 /// <summary>Privileged network repairs the tray may request. Each maps to one hard-coded operation in the service.</summary>
@@ -39,6 +45,10 @@ public enum ServiceEvent
     ShutdownCancelled,
     LedTest,
     ResetWallpaper,
+    /// <summary>Lock this PC for an active period (CHANGE-001 2.4): the tray ends explorer and shows the lock window.</summary>
+    Lock,
+    /// <summary>Clear a lock the service no longer wants shown (period ended/stopped).</summary>
+    Unlock,
 }
 
 public enum PipeKind { Request, Event, Response }
@@ -64,6 +74,8 @@ public sealed record NetRepairBody(NetRepairAction Action);
 public sealed record ShutdownWarningBody(DateTimeOffset Deadline, int ExtensionsLeft, int ExtensionMinutes);
 public sealed record WallpaperBody(string Path);
 public sealed record LedTestResult(bool Passed, string? Note);
+public sealed record PresetsBody(string Json);
+public sealed record LockBody(string PeriodId, string PeriodName, int CountdownMinutes);
 
 public sealed record AgentStatus(
     bool Enrolled,

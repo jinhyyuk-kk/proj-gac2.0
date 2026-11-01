@@ -62,6 +62,15 @@ public sealed class AgentStore
     public AgentPolicy LoadPolicy() => Read<AgentPolicy>(PolicyPath) ?? new AgentPolicy();
     public void SavePolicy(AgentPolicy p) => WriteAtomic(PolicyPath, GacJson.Serialize(p));
 
+    private string PcPresetsPath => Path.Combine(Root, "presets.json");
+    /// <summary>Per-PC teacher presets (CHANGE-001 2.1) held by the SYSTEM service; shared by everyone who uses the PC.</summary>
+    public string LoadPcPresets()
+    {
+        try { return File.Exists(PcPresetsPath) ? File.ReadAllText(PcPresetsPath) : "{\"version\":1,\"presets\":[]}"; }
+        catch (IOException) { return "{\"version\":1,\"presets\":[]}"; }
+    }
+    public void SavePcPresets(string json) => WriteAtomic(PcPresetsPath, json);
+
     public AgentState LoadState() { lock (_lock) return Read<AgentState>(StatePath) ?? new AgentState(); }
 
     public void UpdateState(Action<AgentState> change)

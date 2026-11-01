@@ -42,7 +42,8 @@ public static class ServerCli
             case "apply-firewall": // re-apply the firewall rule for the configured/overridden range (used by the status app)
             {
                 var cfg = ServerIdentity.LoadConfig(dataDir);
-                var ranges = ParseArg(args, "--range") is { } r && LanDetection.IsValidCidr(r) ? [r] : cfg.Ranges ?? DetectRanges();
+                var ranges = ParseArg(args, "--range") is { } r && LanDetection.IsValidCidr(r) ? [r]
+                    : cfg.Ranges is { Length: > 0 } existing ? existing : DetectRanges();
                 ServerIdentity.SaveConfig(dataDir, cfg with { Ranges = ranges });
                 ApplyFirewall(cfg.Port, ranges);
                 Console.WriteLine(string.Join(",", ranges));
@@ -83,12 +84,18 @@ public static class ServerCli
         return new Accounts.AccountService(db, new AuditLog(db, TimeProvider.System), TimeProvider.System).EnsureSetupCode();
     }
 
-    /// <summary>One inbound TCP rule allowing only the detected range(s) on only the port, across all firewall profiles.</summary>
+    /// <summary>
+    /// One inbound TCP rule allowing only the detected range(s) on only the port, bound to this server executable.
+    /// profile=any is intentional (school LANs are often classified Public, CHANGE-001 §2) but the rule stays scoped by
+    /// remoteip and program. Fails closed: with no valid range it restricts to the local subnet rather than the world.
+    /// </summary>
     private static void ApplyFirewall(int port, string[] ranges)
     {
         Run("netsh", $"advfirewall firewall delete rule name=\"{FirewallRuleName}\"", ignoreErrors: true);
-        var remote = ranges.Length > 0 ? $" remoteip={string.Join(",", ranges)}" : "";
-        Run("netsh", $"advfirewall firewall add rule name=\"{FirewallRuleName}\" dir=in action=allow protocol=TCP localport={port}{remote} profile=any");
+        var valid = ranges.Where(LanDetection.IsValidCidr).ToArray();
+        var remote = valid.Length > 0 ? string.Join(",", valid) : "localsubnet"; // fail closed to local subnet
+        var exe = Environment.ProcessPath!;
+        Run("netsh", $"advfirewall firewall add rule name=\"{FirewallRuleName}\" dir=in action=allow protocol=TCP localport={port} remoteip={remote} program=\"{exe}\" profile=any");
     }
 
     /// <summary>Idempotent: safe to run again on upgrade. Keeps existing cert, keys and database.</summary>

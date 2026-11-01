@@ -26,6 +26,7 @@ public sealed class AgentCore : IPackageSource
     public ReportQueue Queue { get; }
     public TrayPipeServer Tray { get; }
     public ShutdownCoordinator Shutdown { get; }
+    public LockController Lock { get; }
     public ReplayGuard Replay { get; }
     public AgentPolicy Policy { get; private set; }
     public string Version { get; } = typeof(AgentCore).Assembly.GetName().Version?.ToString(3) ?? "2.0.0";
@@ -81,6 +82,7 @@ public sealed class AgentCore : IPackageSource
         _identity = store.LoadIdentity();
         _netRepair = new NetRepairService(runner);
         Shutdown = new ShutdownCoordinator(tray, shutdownExecutor ?? new WindowsShutdownExecutor(runner), time, OnShutdownLog);
+        Lock = new LockController(tray);
         _modules = moduleFactory(this).ToDictionary(m => m.Id);
         tray.Handler = HandleTrayAsync;
     }
@@ -179,6 +181,8 @@ public sealed class AgentCore : IPackageSource
         switch (req)
         {
             case TrayRequest.Hello:
+                // A tray just connected (e.g. the user logged in): re-assert any active locks for this PC.
+                Lock.Resend(Periods);
                 return new PipeResponse(true, "ok");
             case TrayRequest.GetStatus:
             {
@@ -207,6 +211,30 @@ public sealed class AgentCore : IPackageSource
                 Queue.Enqueue(new ModuleReport(Guid.NewGuid(), null, ModuleIds.NetDiag, ModuleActions.NetDiagRun, report.Healthy, $"[{user}] {summary}",
                     GacJson.Serialize(report), now, now, ReportTrigger.Tray));
                 return new PipeResponse(true, "진단 결과를 관리자에게 보냈습니다.");
+            }
+            case TrayRequest.GetPresets:
+                // Per-PC teacher presets (CHANGE-001 2.1): stored by the service, shared by whoever uses this PC.
+                return new PipeResponse(true, "ok", Store.LoadPcPresets());
+            case TrayRequest.SavePresets:
+            {
+                var body = msg.Body<PresetsBody>();
+                if (body == null) return new PipeResponse(false, "프리셋이 비어 있습니다.");
+                var (file, result) = Gac.Shared.ClassMode.PresetValidator.Parse(body.Json, allowRunCommand: false); // teacher context: no run_command/lock_pc
+                if (file == null) return new PipeResponse(false, result.ErrorText);
+                Store.SavePcPresets(GacJson.Serialize(file));
+                return new PipeResponse(true, "저장했습니다.");
+            }
+            case TrayRequest.Unlock:
+            {
+                var body = msg.Body<UnlockRequest>();
+                if (body == null) return new PipeResponse(false, "요청이 비어 있습니다.");
+                var client = Client;
+                if (client == null) return new PipeResponse(false, "서버에 연결할 수 없습니다");
+                UnlockResponse r;
+                try { r = await client.UnlockAsync(body, ct); }
+                catch (Exception e) when (e is HttpRequestException or TaskCanceledException or IOException) { return new PipeResponse(false, "서버에 연결할 수 없습니다"); }
+                if (r.Unlocked) Lock.MarkUnlocked(body.PeriodId); // lifted until restart (CHANGE-001 2.4)
+                return new PipeResponse(r.Unlocked, r.Message);
             }
             default:
                 return new PipeResponse(false, "허용되지 않은 요청입니다.");

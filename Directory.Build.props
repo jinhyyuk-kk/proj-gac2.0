@@ -10,6 +10,6 @@
     <Copyright>Copyright (c) 2026 JH</Copyright>
     <SatelliteResourceLanguages>ko;en</SatelliteResourceLanguages>
     <InvariantGlobalization>false</InvariantGlobalization>
-    <NoWarn>$(NoWarn);CA1416;CS0649</NoWarn>
+    <NoWarn>$(NoWarn);CA1416;CS0649;WFO1000</NoWarn>
   </PropertyGroup>
 </Project>
