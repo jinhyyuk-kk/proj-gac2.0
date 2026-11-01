@@ -1,7 +1,7 @@
 # Progress
 
-Status as of 2026-10-31. Automated checks: `dotnet build` (0 errors), `dotnet test` — 121 tests passing
-(Shared 29, Server 8, Modules 43, Agent 13 incl. end-to-end, Console 28).
+Status as of 2026-11-01. Automated checks: `dotnet build` (0 errors), `dotnet test` — 199 tests passing
+(Shared 29, Server 54, Modules 45, Agent 17 incl. end-to-end, Console 35, Tamper 19).
 `build/build-installers.ps1` produces `dist/GAC-Server-Setup.exe`, `GAC-Console-Setup.exe`, `GAC-Agent-Setup.exe`, `GAC-Demo.exe`.
 
 Items marked **manual** need real hardware or a clean VM and have **not** been verified yet.
@@ -38,9 +38,9 @@ Items marked **manual** need real hardware or a clean VM and have **not** been v
 - `LICENSE` (MIT, JH, 2026); `docs/INSTALL.md`.
 - **Manual:** clean Windows 10/11 VM without internet: demo from USB, install all three from `/dist`, uninstall leaves nothing behind.
 
-## CHANGE-001 (in progress)
+## CHANGE-001 ✅ (automated) / manual pending
 
-Applied so far (all tested — 174 automated tests passing):
+Spec archived at `docs/changes/CHANGE-001.md`. All items applied; 199 automated tests passing.
 - **Desktop-only, server-enforced (1.1–1.3):** five hardware probes + report collector; server `DeviceGuard` decides at
   enrollment, heartbeat and command dispatch; fails closed on missing/inconsistent data; integrity-hash check; wired-only
   enrollment; permanent block for mobile/portable; battery-only → "확인 필요"; per-agent key bound to fingerprint; revoke.
@@ -53,16 +53,21 @@ Applied so far (all tested — 174 automated tests passing):
 - **Period presets + lock_pc (2.3–2.4, server):** PeriodService create/stop/deliver, ECDSA-signed, `lock_pc` stripped
   for work PCs; `lock_pc` rejected in teacher presets; unlock endpoint authorizes on the server and audits the account.
 - **Missed shutdown (2.5):** skipped and logged, never caught up at boot.
+- **Server LAN range + firewall (2):** `LanDetection` CIDR detect; `netsh` rule for exactly that range + port, fail-closed
+  to localsubnet; server CLI `install --port --range`, `detect-range`, `apply-firewall`. **GAC 서버 상태** app (6) with
+  service controls, range re-detect/add, rollout export. Rollout package (`gac-agent.json`) export (2).
+- **Client no-login + per-PC presets (2.1):** presets/periods stored per PC under ProgramData (DACL-locked), no client login.
+- **Tray watchdog (2.2):** the SYSTEM service relaunches the tray (`CreateProcessAsUser`) when no verified tray is connected;
+  lock/preset state in the service survives tray kill, reboot, and the server being offline.
+- **`lock_pc` client execution (2.4):** full-screen lock window with the fixed text + live countdown, admin-unlock dialog
+  via pipe → service → server; countdown-to-zero requests shutdown.
+- **Console UI (3–7):** sign-up/login screen, account dashboard + permission-matrix editor + ownership transfer,
+  기기 관리 (차단 / 확인 필요), alias editing, period create/stop, 업무용 PC handling, rollout export.
+- **Demo three-view (7):** picker + 화면 전환 menu over one shared fake server — console (sign-up→owner), server PC
+  (fake installer + GAC 서버 상태), client PC (tray, lock, agent-install refusals).
 
-Remaining (not yet built) — mostly WinForms UI and installer/runtime integration, hard to verify without real hardware:
-- Server LAN-range auto-detect + single-range firewall rule; **GAC 서버 상태** app (6); rollout package export (2).
-- Client no-login + presets stored per PC in ProgramData (2.1); tray watchdog restart by the service (2.2).
-- `lock_pc` client execution (lock window + live countdown + unlock dialog via pipe→service→server).
-- Console UI: sign-up/login two-button screen, account dashboard + matrix editor + transfer, 차단된 기기 / 확인 필요 lists,
-  alias editing, period create/stop, 업무용 PC marking.
-- Demo three-view picker (console / server / client) (7).
-- `CLAUDE.md` sync (9) and moving `CHANGE-001.md` to `docs/changes/` once complete.
-- Remaining section-8 tests: HTTP enrollment-rejection e2e, lock_pc client behavior, watchdog, demo no-touch for new paths.
+Remaining: **manual** verification only (real hardware / clean VM) — hardware probe accuracy on real laptops & desktops,
+firewall rule on a real LAN, tray watchdog and lock across reboot, silent rollout install.
 
 ## Known limitations
 - Binaries are not code-signed (SmartScreen warning documented).
