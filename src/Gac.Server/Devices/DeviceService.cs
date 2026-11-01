@@ -33,6 +33,9 @@ public sealed class DeviceService(Db db, AuditLog audit, DeviceGuard guard, Time
         // Permanently blocked devices stay blocked no matter what they now report.
         if (existing is { permanent: 1, status: "blocked" })
             return (new DeviceDecision(Enum.TryParse<DeviceVerdict>(existing.verdict, out var v) ? v : DeviceVerdict.LaptopChassis, false, false, true, existing.reason ?? DeviceGuard.LaptopMessage), fp);
+        // A device the Owner revoked cannot re-enroll until it is explicitly removed from the console.
+        if (existing is { status: "revoked" })
+            return (new DeviceDecision(DeviceVerdict.ConsoleFirst, false, false, existing.permanent == 1, existing.reason ?? "이 PC는 관리자에 의해 차단되었습니다."), fp);
 
         var consoleFirst = existing is { console_login_at: not null }
             && (existing.agent_enrolled_at is null || existing.console_login_at < existing.agent_enrolled_at);
@@ -64,8 +67,12 @@ public sealed class DeviceService(Db db, AuditLog audit, DeviceGuard guard, Time
             new { pcId, fp = fingerprint, now = Time.Ms(time.GetUtcNow()) });
     }
 
-    /// <summary>Called after a successful Console login from <paramref name="fingerprint"/> (work-PC + install-order tracking).</summary>
-    public void RecordConsoleLogin(string fingerprint)
+    /// <summary>
+    /// Records a successful Console login from <paramref name="fingerprint"/> for install-order tracking. The work-PC
+    /// exemption (lock_pc skip) is only granted when the login is by a staff account (Owner/Admin) — a student with a
+    /// Viewer/Operator account cannot exempt a classroom PC from a lock by logging in on it (security review).
+    /// </summary>
+    public void RecordConsoleLogin(string fingerprint, bool staffAccount)
     {
         if (string.IsNullOrEmpty(fingerprint)) return;
         var now = Time.Ms(time.GetUtcNow());
@@ -74,7 +81,7 @@ public sealed class DeviceService(Db db, AuditLog audit, DeviceGuard guard, Time
             INSERT INTO devices(fingerprint, status, first_seen, last_seen, console_login_at) VALUES(@fp, 'console', @now, @now, @now)
             ON CONFLICT(fingerprint) DO UPDATE SET console_login_at = COALESCE(console_login_at, @now), last_seen = @now
             """, new { fp = fingerprint, now });
-        c.Execute("UPDATE pcs SET work_pc = 1 WHERE fingerprint = @fp", new { fp = fingerprint });
+        if (staffAccount) c.Execute("UPDATE pcs SET work_pc = 1 WHERE fingerprint = @fp", new { fp = fingerprint });
     }
 
     /// <summary>Re-check on every heartbeat; returns a revoke reason when the device may no longer act as a client.</summary>
@@ -83,7 +90,8 @@ public sealed class DeviceService(Db db, AuditLog audit, DeviceGuard guard, Time
         using var c = db.Open();
         if (c.QuerySingleOrDefault<long>("SELECT revoked FROM pcs WHERE id = @pcId", new { pcId }) == 1)
             return "이 PC는 관리자에 의해 차단되었습니다.";
-        if (report is null) return null; // older agent; enrollment already enforced
+        // Fail closed: an enrolled agent must send its device report on every heartbeat (security review).
+        if (report is null) return "하드웨어 확인 값이 전달되지 않았습니다.";
         var fp = DeviceGuard.Fingerprint(report);
         var bound = c.QuerySingleOrDefault<string>("SELECT fingerprint FROM pcs WHERE id = @pcId", new { pcId });
         if (bound != null && !string.Equals(bound, fp, StringComparison.OrdinalIgnoreCase))

@@ -192,7 +192,7 @@ public sealed class EndToEndTests : IAsyncLifetime
         var evil = GacJson.Serialize(new DeployPackageRequest(pkg.Id, "evil.exe", "00", "/S & calc", 600));
         var send = await owner.PostAsJsonAsync("/api/commands", new SendCommandRequest(ModuleIds.Deploy, ModuleActions.DeployInstall, evil, [pc.Id]), GacJson.Options);
         send.EnsureSuccessStatusCode();
-        var cmds = await client.PollAsync(new PollRequest("2.0.0", null, null, null, 0), default);
+        var cmds = await client.PollAsync(new PollRequest("2.0.0", null, null, null, 0, Device: DesktopReport()), default);
         var delivered = GacJson.Deserialize<DeployPackageRequest>(Assert.Single(cmds.Commands).PayloadJson)!;
         Assert.Equal("setup.exe", delivered.FileName);
         Assert.Equal("/S", delivered.SilentArgs);

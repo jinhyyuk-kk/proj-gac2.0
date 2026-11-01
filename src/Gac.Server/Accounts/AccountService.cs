@@ -53,11 +53,11 @@ public sealed class AccountService(Db db, AuditLog audit, TimeProvider time, int
         if (c.ExecuteScalar<long>("SELECT COUNT(*) FROM accounts", transaction: tx) != 0)
             throw new GacException("이미 계정이 있습니다. 회원가입은 처음 한 번만 할 수 있습니다.", 409);
         var setup = c.QuerySingleOrDefault<string>("SELECT value FROM settings WHERE key = 'setup_code'", transaction: tx);
-        if (!string.IsNullOrEmpty(setup))
-        {
-            if (!CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(NormalizeCode(req.EnrollCode)), Encoding.UTF8.GetBytes(NormalizeCode(setup))))
-                throw new GacException("설치 코드가 올바르지 않습니다. 서버 설치 마지막 화면에 표시된 설치 코드를 입력하세요.", 403);
-        }
+        // Fail closed: sign-up is impossible until a setup code has been provisioned (install / first run).
+        if (string.IsNullOrEmpty(setup))
+            throw new GacException("설치 코드가 준비되지 않았습니다. 서버를 다시 설치하거나 관리 PC에서 설치 코드를 생성하세요.", 403);
+        if (!CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(NormalizeCode(req.EnrollCode)), Encoding.UTF8.GetBytes(NormalizeCode(setup))))
+            throw new GacException("설치 코드가 올바르지 않습니다. 서버 설치 마지막 화면에 표시된 설치 코드를 입력하세요.", 403);
         var id = Insert(c, tx, new SaveAccountRequest(req.UserName, req.DisplayName, Role.Owner, false, [], req.Password));
         c.Execute("DELETE FROM settings WHERE key = 'setup_code'", transaction: tx); // single-use: destroyed after first sign-up
         tx.Commit();

@@ -64,7 +64,8 @@ public sealed class PcService(Db db, SettingsStore settings, AuditLog audit, Tim
             c.Execute("INSERT INTO pcs(id, name, agent_key, enrolled_at, os, agent_version, mac, fingerprint, revoked) VALUES(@id, @name, @key, @now, @os, @ver, @mac, @fp, 0)",
                 new { id, name, key = Convert.ToBase64String(key), now = Time.Ms(time.GetUtcNow()), os = req.OsVersion, ver = req.AgentVersion, mac = req.MacAddress, fp = fingerprint });
         else
-            c.Execute("UPDATE pcs SET agent_key = @key, os = @os, agent_version = @ver, mac = @mac, fingerprint = COALESCE(@fp, fingerprint), revoked = 0 WHERE id = @id",
+            // Re-enrollment keeps the revoked flag: a revoked PC cannot quietly reinstate itself (security review).
+            c.Execute("UPDATE pcs SET agent_key = @key, os = @os, agent_version = @ver, mac = @mac, fingerprint = COALESCE(@fp, fingerprint) WHERE id = @id",
                 new { id, key = Convert.ToBase64String(key), os = req.OsVersion, ver = req.AgentVersion, mac = req.MacAddress, fp = fingerprint });
         audit.Write("agent:" + name, existing == null ? "pc.enroll" : "pc.reenroll", name);
         return (id, key);

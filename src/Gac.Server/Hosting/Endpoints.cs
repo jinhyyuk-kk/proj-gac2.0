@@ -97,7 +97,9 @@ public static class Endpoints
         app.MapPost("/api/auth/login", (LoginRequest req, AccountService acc, Devices.DeviceService devices) =>
         {
             var resp = acc.Login(req);
-            if (!string.IsNullOrWhiteSpace(req.MachineFingerprint)) devices.RecordConsoleLogin(req.MachineFingerprint!);
+            // Work-PC exemption is only granted for logins by staff accounts (Owner/Admin), never a student's Viewer/Operator.
+            if (!string.IsNullOrWhiteSpace(req.MachineFingerprint))
+                devices.RecordConsoleLogin(req.MachineFingerprint!, staffAccount: resp.Account.Role is Role.Owner or Role.Admin);
             return Results.Ok(resp);
         });
 
@@ -194,7 +196,7 @@ public static class Endpoints
         // period presets (CHANGE-001 2.3)
         api.MapGet("/periods", (HttpContext ctx, Periods.PeriodService p) => Need(ctx, Permission.ViewReports) ?? Results.Ok(p.List()));
         api.MapPost("/periods", (CreatePeriodRequest req, HttpContext ctx, Periods.PeriodService p, PcService pcs) =>
-            Need(ctx, Permission.ManagePresets) ?? Results.Ok(p.Create(S(ctx), req, groups => pcs.PcIdsInGroups(S(ctx), groups))));
+            Need(ctx, Permission.ManagePresets) ?? Results.Ok(p.Create(S(ctx), req, groups => pcs.PcIdsInGroups(S(ctx), groups), pc => S(ctx).CanAccessGroup(pcs.GetGroupId(pc)))));
         api.MapPost("/periods/{id}/stop", (string id, HttpContext ctx, Periods.PeriodService p) => Need(ctx, Permission.ManagePresets) ?? Do(() => p.Stop(S(ctx), id)));
     }
 

@@ -23,7 +23,8 @@ public sealed class AccountServiceTests : IDisposable
         var db = new Db(_path);
         db.EnsureSchema();
         _svc = new AccountService(db, new AuditLog(db, _time), _time, iterations: 1000);
-        var o = _svc.CreateOwner(new CreateOwnerRequest("owner", "교장", "Passw0rd!x", "code"));
+        var code = _svc.EnsureSetupCode();
+        var o = _svc.CreateOwner(new CreateOwnerRequest("owner", "교장", "Passw0rd!x", code));
         _owner = new Session(o.Id, o.UserName, o.DisplayName, o.Role, []);
     }
 

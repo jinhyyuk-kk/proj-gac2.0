@@ -24,7 +24,7 @@ public sealed class PeriodService(Db db, AuditLog audit, ServerIdentity identity
         public long start_at; public long end_at; public string started_by = ""; public long stopped;
     }
 
-    public PeriodPresetInfo Create(Session actor, CreatePeriodRequest req, Func<IEnumerable<int>, IEnumerable<string>> pcsInGroups)
+    public PeriodPresetInfo Create(Session actor, CreatePeriodRequest req, Func<IEnumerable<int>, IEnumerable<string>> pcsInGroups, Func<string, bool> canTargetPc)
     {
         if (string.IsNullOrWhiteSpace(req.PeriodName) || req.PeriodName.Length > 40) throw new GacException("기간 이름을 1~40자로 입력하세요.");
         if (req.Days is < 1 or > MaxDays) throw new GacException($"기간(일)은 1~{MaxDays} 사이여야 합니다.");
@@ -33,6 +33,9 @@ public sealed class PeriodService(Db db, AuditLog audit, ServerIdentity identity
         var preset = file.Presets[0];
         var hasLock = preset.Actions.Any(a => a.Type == PresetActionTypes.LockPc);
 
+        // Explicit PcIds must be in the session's accessible groups (same rule as command dispatch, security review).
+        foreach (var pc in req.PcIds.Distinct())
+            if (!canTargetPc(pc)) throw new GacException("담당 그룹이 아닌 PC는 대상으로 지정할 수 없습니다.", 403);
         var targets = req.PcIds.Concat(pcsInGroups(req.GroupIds ?? [])).Distinct().ToList();
         if (targets.Count == 0) throw new GacException("대상 PC를 선택하세요.");
 
