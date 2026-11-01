@@ -4,10 +4,14 @@ public sealed record EnrollHelloResponse(string Proof, string ServerName, string
 
 /// <param name="PreviousAgentId">Set when the agent re-enrolls and still has its old identity.</param>
 /// <param name="PreviousProof">HMAC(old agent key, <see cref="Security.EnrollmentProof.ReenrollMessage"/>) proving it owns that identity.</param>
+/// <param name="Device">Raw hardware probes, install markers and integrity hashes. The server decides desktop vs. laptop.</param>
 public sealed record EnrollRequest(string Code, string MachineName, string? OsVersion, string? MacAddress, string AgentVersion,
-    string? PreviousAgentId = null, string? PreviousProof = null);
+    string? PreviousAgentId = null, string? PreviousProof = null, DeviceReport? Device = null);
 
-public sealed record EnrollResponse(string AgentId, string AgentKeyBase64, string PresetPublicKeyPem, int PollSeconds);
+public enum EnrollStatus { Enrolled, Rejected, PendingReview }
+
+public sealed record EnrollResponse(string AgentId, string AgentKeyBase64, string PresetPublicKeyPem, int PollSeconds,
+    EnrollStatus Status = EnrollStatus.Enrolled, string? Message = null);
 
 /// <summary>Command as delivered to an agent. Signed with the per-agent HMAC key (see <see cref="Security.CommandSigner"/>).</summary>
 public sealed record AgentCommand(
@@ -25,13 +29,18 @@ public sealed record PollRequest(
     string? IpAddress,
     string? OsVersion,
     int QueuedReports,
-    string? PolicyVersion = null);
+    string? PolicyVersion = null,
+    DeviceReport? Device = null);
 
+/// <summary>Tells a polling agent the server has revoked it (laptop found later, tampering, Owner revoke). The agent stops.</summary>
 public sealed record PollResponse(
     IReadOnlyList<AgentCommand> Commands,
     AgentPolicy? Policy,
     string? PolicyVersion,
-    int PollSeconds);
+    int PollSeconds,
+    bool Revoked = false,
+    string? RevokedReason = null,
+    IReadOnlyList<PeriodPreset>? Periods = null);
 
 public enum ReportTrigger { Command, Schedule, Tray, Event }
 

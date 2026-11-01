@@ -19,9 +19,14 @@ public static class PresetActionTypes
     public const string Wait = "wait";
     /// <summary>Only allowed in console-distributed presets signed by the server key.</summary>
     public const string RunCommand = "run_command";
+    /// <summary>Locks the PC for the period. Console presets only (CHANGE-001 2.4); never in a teacher's own preset.</summary>
+    public const string LockPc = "lock_pc";
 
     public static readonly IReadOnlyList<string> TeacherAllowed =
         [SetVolume, Mute, Unmute, DisplayMode, SetResolution, OpenUrl, LaunchApp, CloseApp, Wait];
+
+    /// <summary>Actions only allowed in console-distributed / period presets (signed by the server key).</summary>
+    public static readonly IReadOnlyList<string> ConsoleOnly = [RunCommand, LockPc];
 
     public static readonly IReadOnlyList<string> DisplayModes = ["clone", "extend", "internal", "external"];
 
@@ -37,6 +42,7 @@ public static class PresetActionTypes
         CloseApp => "프로그램 종료",
         Wait => "대기",
         RunCommand => "명령 실행(관리자 배포)",
+        LockPc => "PC 잠금(기간제)",
         _ => type,
     };
 
@@ -76,6 +82,7 @@ public sealed class PresetAction
         PresetActionTypes.CloseApp => $"프로그램 종료: {ProcessName}",
         PresetActionTypes.Wait => $"{Seconds}초 대기",
         PresetActionTypes.RunCommand => $"명령 실행: {Command}",
+        PresetActionTypes.LockPc => "PC 잠금 (기간 동안 사용 불가)",
         _ => Type,
     };
 }
@@ -154,6 +161,9 @@ public static class PresetValidator
                 case PresetActionTypes.RunCommand:
                     if (!allowRunCommand) errors.Add($"{p}: '명령 실행'은 관리자가 배포한 프리셋에서만 사용할 수 있습니다.");
                     else if (string.IsNullOrWhiteSpace(a.Command)) errors.Add($"{p}: 실행할 명령을 입력하세요.");
+                    break;
+                case PresetActionTypes.LockPc:
+                    if (!allowRunCommand) errors.Add($"{p}: 'PC 잠금'은 관리자가 배포한 기간제 프리셋에서만 사용할 수 있습니다.");
                     break;
                 default:
                     errors.Add($"{p}: 알 수 없는 동작 종류입니다 ({a.Type}).");
