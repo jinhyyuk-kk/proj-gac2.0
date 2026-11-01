@@ -6,6 +6,7 @@
     <AssemblyName>Gac.Agent</AssemblyName>
     <RootNamespace>Gac.Agent</RootNamespace>
     <UserSecretsId></UserSecretsId>
+    <ApplicationIcon>..\..\assets\icons\gac.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>

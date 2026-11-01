@@ -102,6 +102,7 @@ public static class ServerCli
     {
         var cfg = ServerIdentity.LoadConfig(dataDir);
         using var id = ServerIdentity.LoadOrCreate(dataDir);
+        Admin.LocalRegistry.Write(cfg.Port, id.Thumbprint); // for the unelevated GAC 서버 관리 tray icon
         var setup = cfg.IsInstallComplete ? SetupCode(dataDir, ensure: false) : null;
         var ranges = cfg.Ranges is { Length: > 0 } r ? string.Join(", ", r) : "(미설정)";
         File.WriteAllText(Path.Combine(dataDir, "enrollment.txt"),
@@ -196,6 +197,7 @@ public static class ServerCli
         WaitForStop();
         Run("sc.exe", $"delete {ServiceName}", ignoreErrors: true);
         Firewall.Delete();
+        Admin.LocalRegistry.Delete();
         if (deleteData && Directory.Exists(dataDir))
         {
             try { Directory.Delete(dataDir, recursive: true); }

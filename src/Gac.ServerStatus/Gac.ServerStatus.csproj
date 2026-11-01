@@ -7,9 +7,14 @@
     <RootNamespace>Gac.ServerStatus</RootNamespace>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>..\..\assets\icons\gac.ico</ApplicationIcon>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\Gac.Server\Gac.Server.csproj" />
     <ProjectReference Include="..\Gac.Tray.UI\Gac.Tray.UI.csproj" />
+    <ProjectReference Include="..\Gac.ServerAdmin.UI\Gac.ServerAdmin.UI.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Gac.Server.Tests" />
   </ItemGroup>
 </Project>

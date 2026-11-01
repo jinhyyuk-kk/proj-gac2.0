@@ -6,6 +6,7 @@
     <RootNamespace>Gac.Server</RootNamespace>
     <OutputType>Exe</OutputType>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>..\..\assets\icons\gac.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>

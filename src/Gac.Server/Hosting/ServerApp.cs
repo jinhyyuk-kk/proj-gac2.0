@@ -25,11 +25,14 @@ public static class ServerApp
         builder.Logging.ClearProviders();
         builder.Logging.AddSimpleConsole(o => o.SingleLine = true);
         if (OperatingSystem.IsWindows() && !options.LoopbackOnly) builder.Logging.AddEventLog(s => s.SourceName = "GAC Server");
+        // Daily log files under the data folder: shown in GAC 서버 관리 → 로그 (CHANGE-002 §4.4).
+        if (!options.LoopbackOnly) builder.Logging.AddProvider(new Gac.Shared.Logging.FileLoggerProvider(options.LogsDir, "server"));
         builder.Logging.SetMinimumLevel(LogLevel.Information);
         builder.Logging.AddFilter("Microsoft.AspNetCore", LogLevel.Warning);
 
         Directory.CreateDirectory(options.DataDir);
         var identity = ServerIdentity.LoadOrCreate(options.DataDir);
+        Admin.LocalAdmin.LoadOrCreate(options.DataDir); // key for the elevated GAC 서버 관리 app (admin-only data folder)
         var db = new Db(options.DatabasePath);
         db.EnsureSchema();
 
@@ -78,7 +81,8 @@ public static class ServerApp
         new AccountService(db, new AuditLog(db, time), time).EnsureSetupCode();
         builder.Services.AddHostedService<MaintenanceService>();
         // CHANGE-002 §4: overload blocking + alerts, Admin PC auto shutdown.
-        builder.Services.AddSingleton(sp => new Admin.OverloadGuard(db, sp.GetRequiredService<SettingsStore>(), sp.GetRequiredService<AuditLog>(), time));
+        builder.Services.AddSingleton(sp => new Admin.OverloadGuard(db, sp.GetRequiredService<SettingsStore>(), sp.GetRequiredService<AuditLog>(), time,
+            sp.GetRequiredService<ILoggerFactory>().CreateLogger<Admin.OverloadGuard>()));
         builder.Services.AddSingleton(new Admin.AlertStore(db, time));
         var power = options.PowerAction ?? (options.LoopbackOnly ? new NoPowerAction() : new Admin.WindowsServerPowerAction());
         builder.Services.AddSingleton(sp => new Admin.ServerShutdownService(sp.GetRequiredService<SettingsStore>(), sp.GetRequiredService<AuditLog>(), db, time, power));

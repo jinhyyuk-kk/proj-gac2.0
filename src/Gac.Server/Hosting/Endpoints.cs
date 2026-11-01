@@ -234,6 +234,13 @@ public static class Endpoints
         app.MapPost("/api/local/server-shutdown/skip-today", (HttpContext ctx, Admin.ServerShutdownService s) => Loopback(ctx) ?? Do(() => s.SkipToday(LocalActor())));
         app.MapPost("/api/local/server-shutdown/extend", (HttpContext ctx, Admin.ServerShutdownService s) => Loopback(ctx) ?? Do(() => s.Extend(LocalActor())));
 
+        // Admin PC only, elevated GAC 서버 관리 (loopback + local admin key): live overload blocks.
+        app.MapGet("/api/local/admin/overload/blocks", (HttpContext ctx, Admin.OverloadGuard g, ServerOptions o) => LocalAdminOnly(ctx, o) ?? Results.Ok(g.Blocks()));
+        app.MapPost("/api/local/admin/overload/blocks/{key}/unblock", (string key, HttpContext ctx, Admin.OverloadGuard g, ServerOptions o) =>
+            LocalAdminOnly(ctx, o) ?? Do(() => g.Unblock(LocalAdminActor(ctx), key)));
+        app.MapPost("/api/local/admin/overload/blocks/{key}/permanent", (string key, HttpContext ctx, Admin.OverloadGuard g, Devices.DeviceService d, ServerOptions o) =>
+            LocalAdminOnly(ctx, o) ?? Do(() => d.BlockPermanently(LocalAdminActor(ctx), g.TakeForPermanentBlock(key), "과도한 요청으로 영구 차단되었습니다.")));
+
         // calendar: lock exemption days (CHANGE-002 §2). Everyone with Console access can view; changes need 캘린더 관리.
         api.MapGet("/calendar/exemptions", (Calendar.ExemptionService e) => Results.Ok(e.List()));
         api.MapPost("/calendar/exemptions", (SaveExemptionDayRequest req, HttpContext ctx, Calendar.ExemptionService e) =>
@@ -259,6 +266,17 @@ public static class Endpoints
 
     private static IResult? Loopback(HttpContext ctx) =>
         ctx.Connection.RemoteIpAddress is { } ip && System.Net.IPAddress.IsLoopback(ip) ? null : Results.StatusCode(404);
+
+    private static IResult? LocalAdminOnly(HttpContext ctx, ServerOptions o) =>
+        Loopback(ctx) ?? (Admin.LocalAdmin.Check(Admin.LocalAdmin.LoadOrCreate(o.DataDir), ctx.Request.Headers[Admin.LocalAdmin.Header].ToString()) ? null : Results.StatusCode(404));
+
+    /// <summary>The Windows account name the elevated app reports, for the audit log ("Windows 관리자(name)").</summary>
+    private static string LocalAdminActor(HttpContext ctx)
+    {
+        var user = ctx.Request.Headers["X-Gac-Local-User"].ToString();
+        user = new string(user.Where(c => char.IsLetterOrDigit(c) || c is '.' or '-' or '_' or ' ').Take(40).ToArray());
+        return $"Windows 관리자({(user.Length > 0 ? user : "관리 PC")})";
+    }
 
     private static string LocalActor() => "관리 PC 사용자"; // the person at the Admin PC (the service itself runs as SYSTEM)
 

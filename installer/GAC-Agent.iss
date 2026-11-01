@@ -28,6 +28,8 @@ MinVersion=10.0
 WizardStyle=modern
 CloseApplications=no
 UninstallDisplayName=GAC 2.0 에이전트
+; CHANGE-002 §1.4: the client installer uses the GAC icon.
+SetupIconFile=..\assets\icons\gac.ico
 UninstallDisplayIcon={app}\Tray\Gac.Tray.exe
 SetupLogging=yes
 

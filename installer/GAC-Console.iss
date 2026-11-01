@@ -25,6 +25,8 @@ MinVersion=10.0
 WizardStyle=modern
 CloseApplications=yes
 UninstallDisplayName=GAC 2.0 콘솔
+; CHANGE-002 §1.4: the Console installer and its uninstall entry use the admin icon (from GAC_ADMIN_SETUP.exe).
+SetupIconFile=..\assets\icons\gac-admin.ico
 UninstallDisplayIcon={app}\Gac.Console.exe
 SetupLogging=yes
 

@@ -12,6 +12,7 @@ internal static class Program
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
         Application.SetDefaultFont(Ui.Font);
+        Ui.AppIcon = GacIcons.Gac; // every tray window, incl. the lock window and shutdown warning (CHANGE-002 §1.4)
 
         // CHANGE-001 1.1, check site #4: the tray refuses to run on a laptop (own probes A + E).
         if (TrayStartupGuard.IsLaptopOrUnknown())
@@ -41,8 +42,10 @@ internal static class Program
         Thread.Sleep(500);
         var status = pipe.GetStatusAsync().GetAwaiter().GetResult();
         var (shared, _) = PresetStore.LoadShared(status?.SharedPresets, status?.PresetPublicKeyPem);
-        var (user, _) = new PresetStore(PresetStore.DefaultUserPath).LoadUser();
-        var preset = shared.Concat(user.Presets).FirstOrDefault(p => p.Id == id);
+        // Per-PC presets live with the service since CHANGE-001 2.1 (not in the user's profile).
+        var r = pipe.RequestAsync(Gac.Shared.Pipe.TrayRequest.GetPresets, null, TimeSpan.FromSeconds(5)).GetAwaiter().GetResult();
+        var pcPresets = r.Ok && r.DataJson != null ? Gac.Shared.ClassMode.PresetValidator.Parse(r.DataJson, allowRunCommand: false).File?.Presets ?? [] : [];
+        var preset = shared.Concat(pcPresets).FirstOrDefault(p => p.Id == id);
         if (preset == null) { Ui.Error(null, "이 바로 가기의 프리셋을 찾을 수 없습니다. 삭제되었을 수 있습니다."); return; }
         var results = new PresetRunner(new WindowsPresetActionExecutor()).RunAsync(preset, null, CancellationToken.None).GetAwaiter().GetResult();
         var failed = results.Where(r => !r.Success).ToList();

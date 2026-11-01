@@ -12,9 +12,10 @@ namespace Gac.Server.Admin;
 /// operator. Blocked requests get HTTP 429 with no body. Console requests are never blocked except a console login
 /// from a source blocked for failed authentications.
 /// </summary>
-public sealed class OverloadGuard(Db db, SettingsStore settings, AuditLog audit, TimeProvider time)
+public sealed class OverloadGuard(Db db, SettingsStore settings, AuditLog audit, TimeProvider time, ILogger? log = null)
 {
     public const string SettingsKey = "overload_settings";
+    private DateTimeOffset _settingsReadAt;
 
     private sealed record Block(string Key, string? AgentId, string Ip, OverloadLimit Limit, DateTimeOffset Started, DateTimeOffset Until, int Offences, int Count);
 
@@ -26,16 +27,29 @@ public sealed class OverloadGuard(Db db, SettingsStore settings, AuditLog audit,
     private readonly Dictionary<string, List<DateTimeOffset>> _offences = new();
     private OverloadSettings? _settings;
 
+    /// <summary>Re-read every 30 s so a change saved by GAC 서버 관리 (straight into the database) takes effect.</summary>
     public OverloadSettings Settings
     {
-        get { lock (_lock) return _settings ??= settings.GetJson(SettingsKey, new OverloadSettings()); }
+        get
+        {
+            lock (_lock)
+            {
+                var now = time.GetUtcNow();
+                if (_settings == null || now - _settingsReadAt > TimeSpan.FromSeconds(30))
+                {
+                    _settings = settings.GetJson(SettingsKey, new OverloadSettings());
+                    _settingsReadAt = now;
+                }
+                return _settings;
+            }
+        }
     }
 
     public void SaveSettings(string actor, OverloadSettings s)
     {
         if (OverloadSettings.Validate(s) is { } err) throw new Accounts.GacException(err);
         settings.SetJson(SettingsKey, s);
-        lock (_lock) _settings = s;
+        lock (_lock) { _settings = s; _settingsReadAt = time.GetUtcNow(); }
         audit.Write(actor, "server.overload.settings", null,
             $"요청 {s.MaxRequestsPerAgentPerMinute}/분, 인증 실패 {s.MaxFailedAuthPerSourcePer10Min}/10분, 등록 {s.MaxEnrollPerSourcePerHour}/시간, 차단 {s.BlockMinutes}분(최대 {s.MaxBlockHours}시간)");
     }
@@ -107,6 +121,7 @@ public sealed class OverloadGuard(Db db, SettingsStore settings, AuditLog audit,
                 VALUES(@id, @alias, @name, @ip, @limit, @count, @start, @until, 0)
                 """, new { id = Guid.NewGuid().ToString("N"), alias, name, ip, limit = limit.ToString(), count, start = Time.Ms(now), until = Time.Ms(block.Until) });
         var who = $"{name ?? "-"} ({ip})";
+        log?.LogWarning("Overload block: {Who} {Limit} count={Count} until={Until:HH:mm} offence={Offence}", who, limit, count, block.Until.ToLocalTime(), block.Offences);
         audit.Write("system", "overload.block", who, $"{OverloadText.Korean(limit)}: {count}회, {(block.Until - now).TotalMinutes:0}분 차단 ({block.Offences}회째)");
         audit.Write("system", "overload.alert", who, "운영자 PC로 알림 전송");
     }

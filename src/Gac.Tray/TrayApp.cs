@@ -338,21 +338,8 @@ internal static class Wallpaper
     private static extern bool SystemParametersInfo(uint action, uint param, string vparam, uint winIni);
 }
 
-/// <summary>Draws the tray icon at runtime (no binary assets needed).</summary>
+/// <summary>The tray icon: the GAC icon's small frame, scaled for the display (CHANGE-002 §1.4: 16/32 px frames).</summary>
 internal static class TrayIcon
 {
-    public static Icon Create()
-    {
-        using var bmp = new Bitmap(32, 32);
-        using (var g = Graphics.FromImage(bmp))
-        {
-            g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
-            g.Clear(Color.Transparent);
-            using var b = new SolidBrush(Ui.Accent);
-            g.FillEllipse(b, 1, 1, 30, 30);
-            using var f = new Font("Segoe UI", 15f, FontStyle.Bold, GraphicsUnit.Pixel);
-            TextRenderer.DrawText(g, "G", f, new Rectangle(0, 0, 32, 32), Color.White, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
-        }
-        return Icon.FromHandle(bmp.GetHicon());
-    }
+    public static Icon Create() => GacIcons.GacSized(SystemInformation.SmallIconSize.Width >= 24 ? 32 : 16);
 }

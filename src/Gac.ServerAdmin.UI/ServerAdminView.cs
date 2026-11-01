@@ -104,9 +104,13 @@ public sealed class ServerAdminView : UserControl
         catch (Exception) { /* transient: next tick */ }
     }
 
+    /// <summary>False when a separate tray icon on the Admin PC already shows the T−10 popup.</summary>
+    public bool ShowShutdownPopup { get; set; } = true;
+
     /// <summary>10 minutes before the server PC shuts down: popup with [오늘은 끄지 않기] / [30분 연장] (CHANGE-002 §4.2).</summary>
     public void CheckShutdownWarning()
     {
+        if (!ShowShutdownPopup) return;
         var s = _backend.GetShutdownStatus();
         if (!s.Warning) { _noticeShown = false; return; }
         if (_noticeShown) return;
@@ -290,20 +294,25 @@ public sealed class ServerAdminView : UserControl
     }
 }
 
-/// <summary>The GAC 서버 관리 window with its tray icon (Admin PC). Closing the window keeps the tray icon.</summary>
+/// <summary>
+/// The GAC 서버 관리 window (Admin PC). With <c>trayIcon</c> it keeps running in the notification area when closed;
+/// the installed app instead runs a separate unelevated tray process and opens this window elevated.
+/// </summary>
 public sealed class ServerAdminForm : Form
 {
-    private readonly NotifyIcon _tray = new() { Text = "GAC 서버 관리", Visible = true };
+    private readonly NotifyIcon _tray = new() { Text = "GAC 서버 관리" };
     private bool _exit;
 
-    public ServerAdminForm(IServerAdminBackend backend)
+    public ServerAdminForm(IServerAdminBackend backend, bool trayIcon = true)
     {
         Ui.Apply(this, "GAC 서버 관리", new Size(900, 620));
         Icon = GacIcons.Gac;
         ShowIcon = true;
         StartPosition = FormStartPosition.CenterScreen;
-        View = new ServerAdminView(backend);
+        View = new ServerAdminView(backend) { ShowShutdownPopup = trayIcon };
         Controls.Add(View);
+        if (!trayIcon) { FormClosed += (_, _) => _tray.Dispose(); return; }
+        _tray.Visible = true;
         _tray.Icon = GacIcons.GacSized(16);
         var menu = new ContextMenuStrip { Font = Ui.Font };
         menu.Items.Add("열기", null, (_, _) => { Show(); WindowState = FormWindowState.Normal; Activate(); });
