@@ -52,3 +52,14 @@ One line each: decision — reason.
 - GAC 서버 관리 UI lives in a UI-only library Gac.ServerAdmin.UI behind IServerAdminBackend — the demo drives the real window without referencing Gac.Server.
 - Console screens: 캘린더 and 알림 are main-window tabs; 서버 관리 is a dialog under 관리 — tabs for things checked daily, a dialog for settings.
 - Server-shutdown schedule editor and overload editor live in Gac.Tray.UI — shared by the Console and the server-management app.
+- Firewall rule read-back uses the HNetCfg.FwPolicy2 COM API, not netsh text — netsh output is localized on Korean Windows.
+- Configs written before CHANGE-002 (no InstallComplete field) count as complete — an upgraded, working server must not lock itself out.
+- The firewall step requires a valid CIDR (no local-subnet fallback) — the person installing confirms the range on the page; silent installs pass /RANGE.
+- Admin PC shutdown state (skipped / extended / warned / done) is stored per day in the settings table — Console, GAC 서버 관리 and the service always agree, and it survives a service restart.
+- Missed-run rule for the Admin PC: if the service started after the due time, today's run is skipped — same rule as client shutdowns.
+- Overload: agent request rate is counted only after the HMAC check (a spoofed agent id cannot get another PC blocked); unknown agent ids (410) count as failed authentication.
+- GAC 서버 관리 runs as two processes: an unelevated tray (started at logon, loopback-only status/skip/extend endpoints) and an elevated window (runas) — no UAC prompt at every logon.
+- Loopback skip/extend from the tray is allowed for anyone at the Admin PC (audited as "관리 PC 사용자") — the spec puts these buttons on the Admin PC popup.
+- Live overload blocks are reached by the elevated app through loopback endpoints guarded by an admin-only key file (local-admin.key in the server data folder).
+- The tray finds the local port and thumbprint under HKLM\SOFTWARE\GAC 2.0\Server (non-secret, readable by users); removed on uninstall.
+- Server writes daily log files (server-YYYYMMDD.log, 14 days) for the 로그 section.

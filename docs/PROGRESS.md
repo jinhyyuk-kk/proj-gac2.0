@@ -69,12 +69,26 @@ Spec archived at `docs/changes/CHANGE-001.md`. All items applied; 199 automated 
 Remaining: **manual** verification only (real hardware / clean VM) — hardware probe accuracy on real laptops & desktops,
 firewall rule on a real LAN, tray watchdog and lock across reboot, silent rollout install.
 
-## CHANGE-002 — demo first ✅ (demo) / real implementation in progress
+## CHANGE-002 ✅ (automated) / manual pending
 
-Done so far: `tools/Gac.IconTool` + icon assets; shared contracts (exemption days, trusted clock, server shutdown,
-overload); Console 캘린더 / 알림 / 서버 관리 screens; `Gac.ServerAdmin.UI` (GAC 서버 관리); everything wired to the demo.
-The real server/agent/installer parts of CHANGE-002 are **not** implemented yet (the Console's HTTP client already calls
-the planned endpoints, which the real server does not serve yet).
+Spec archived at `docs/changes/CHANGE-002.md`. Built demo first (owner order), then the real implementation.
+`dotnet test`: 268 passing (Shared 45, Server 79, Modules 45, Agent 20, Console 46, Tamper 19, Icons 14).
+`build/build-installers.ps1` builds all four `/dist` outputs.
+- **Icons (§1):** `tools/Gac.IconTool extract|build`; `gac-admin.ico` (9 frames from `GAC_ADMIN_SETUP.exe`) for the Console
+  exe/windows/logo/installer; `gac.ico` (16–256 px, transparent) for Tray, Agent, Server, GAC 서버 관리, Demo and the
+  agent/server installers. Tests check every exe and every compiled installer.
+- **Calendar + exemption days (§2):** server rules + audit + 캘린더 관리 permission; poll carries server time + 60 days of
+  dates; agent trusted clock (server time + monotonic, 10-minute tamper rule); `lock_pc` suspended on exemption days
+  (open lock closes, explorer restarts), re-checked every 15 s offline; Console 캘린더 tab.
+- **Server install firewall step (§3):** `firewall` verb creates + reads back + verifies the rule; "설치 미완료" → 503 for
+  enrollment/agent/sign-up; setup code only afterwards; Inno post-install pages with Cancel/Back hidden; `/RANGE` for silent.
+- **GAC 서버 관리 (§4):** 상태 / 자동 종료 / 과부하 차단 / 로그; unelevated tray icon with the T−10 popup; elevated window.
+  Admin PC auto shutdown (warning, skip today, +30 min, waits ≤ 30 min for deploy/update jobs, missed runs skipped).
+  Overload blocking (429, doubling, alerts queued for the Console). Console 알림 tab with Windows notifications and the
+  서버 관리 dialog. Permissions 서버 PC 종료 설정 (Owner+Admin) and 서버 설정 (Owner).
+- **Manual (not yet verified):** installer firewall pages and rule on a real Admin PC (UAC, Korean Windows); tray popup at
+  T−10 on a real logon; a real shutdown of the Admin PC; exemption-day lock closing on a real client left on overnight;
+  overload alert notification on a real operator PC.
 
 ## Demo (GAC-Demo.exe) — what can be tried, where, and how
 
